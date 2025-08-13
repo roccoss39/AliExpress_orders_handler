@@ -1,0 +1,25 @@
+[Unit]
+Description=AliExpress Order Tracker
+After=network.target
+
+[Service]
+Type=simple
+User=dawid
+Group=dawid
+WorkingDirectory=/home/dawid/python/aliexpress_orders
+ExecStart=/usr/bin/python3 /home/dawid/python/aliexpress_orders/main.py
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Środowisko
+Environment=PYTHONPATH=/home/dawid/python/aliexpress_orders
+Environment=PYTHONUNBUFFERED=1
+
+# Limity zasobów
+MemoryMax=1G
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
