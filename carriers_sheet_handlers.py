@@ -1796,6 +1796,7 @@ class EmailAvailabilityManager:
             logging.info("🔍 Sprawdzanie dostępności maili w zakładce Accounts...")
             
             # 1. Pobierz aktywne zamówienia z głównego arkusza
+            # Upewnij się, że pobieramy z dobrego arkusza (zconfigurowanego w SheetsHandler)
             main_sheet = self.sheets_handler.worksheet
             all_orders = main_sheet.get_all_values()
             
@@ -1810,17 +1811,25 @@ class EmailAvailabilityManager:
             
             # Przeiteruj przez zamówienia (pomiń nagłówek)
             for row in all_orders[1:]:
-                if len(row) >= 9: # Upewnij się, że wiersz ma kolumny
-                    email = row[0].strip().lower() # Kolumna A: Email
-                    status = row[8].strip().lower() # Kolumna I: Status (indeks 8)
+                # Sprawdź czy wiersz ma wystarczająco kolumn
+                # Email jest w kolumnie A (indeks 0), Status w kolumnie I (indeks 8)
+                if len(row) > 0:
+                    email_raw = row[0]
+                    # Status może być pusty, wtedy traktujemy jako aktywne
+                    status_raw = row[8] if len(row) > 8 else ""
                     
-                    if email:
+                    if email_raw:
+                        email = email_raw.strip().lower()
+                        status = status_raw.strip().lower()
+                        
                         # Sprawdź czy status oznacza zakończenie
                         is_finished = any(s in status for s in finished_statuses)
                         
                         if not is_finished:
                             # Jeśli nie zakończone = email zajęty
                             busy_emails.add(email)
+
+            logging.info(f"📧 Znaleziono {len(busy_emails)} zajętych emaili: {list(busy_emails)}")
 
             # 2. Zaktualizuj zakładkę Accounts
             accounts_data = self.worksheet.get_all_values()
@@ -1831,26 +1840,36 @@ class EmailAvailabilityManager:
             for i, row in enumerate(accounts_data[1:], start=2): # start=2 bo wiersz 1 to nagłówek
                 if not row: continue
                 
-                email = row[0].strip().lower()
-                if not email: continue
+                # Pobierz email z kolumny A (indeks 0)
+                email_raw = row[0] if len(row) > 0 else ""
                 
+                if not email_raw: continue
+                
+                email = email_raw.strip().lower()
                 is_busy = email in busy_emails
-                status_text = "ZAJĘTY" if is_busy else "WOLNY"
                 
-                # Aktualizuj kolumnę B (Status)
+                status_text = "-" if is_busy else "wolny"
+                
+                # Aktualizuj kolumnę B (Status - indeks 2 w API gspread, bo 1-based)
                 self.worksheet.update_cell(i, 2, status_text)
                 
                 # Kolorowanie (Czerwony=Zajęty, Zielony=Wolny)
-                color = {"red": 1.0, "green": 0.8, "blue": 0.8} if is_busy else {"red": 0.8, "green": 1.0, "blue": 0.8}
+                # Czerwony dla zajętych, Biały/Zielony dla wolnych
+                if is_busy:
+                     color = {"red": 1.0, "green": 0.8, "blue": 0.8} # Czerwony
+                else:
+                     color = {"red": 1.0, "green": 1.0, "blue": 1.0} # Biały (domyślny)
                 
                 self.worksheet.format(f"A{i}:B{i}", {
                     "backgroundColor": color
                 })
-            
-            logging.info(f"✅ Zaktualizowano dostępność maili. Zajętych: {len(busy_emails)}")
+                
+            logging.info(f"✅ Zaktualizowano statusy w Accounts.")
                 
         except Exception as e:
             logging.error(f"Błąd podczas sprawdzania dostępności maili: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
 
 class GLSCarrier(BaseCarrier):
     """Klasa obsługująca przewoźnika GLS"""
