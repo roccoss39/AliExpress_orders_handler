@@ -767,7 +767,7 @@ class OpenAIHandler:
         # Kontynuuj tylko jeśli prompt jest odpowiedniego rozmiaru    
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4.1",
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "Jesteś pomocnikiem, który wyciąga strukturalne dane z maili."},
                     {"role": "user", "content": prompt}
@@ -1011,6 +1011,8 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                 InPost: zazwyczaj 24 cyfry, np. 520000012680041086770098
                 GLS: rózne formaty
                 AliExpress: zwykle zawiera LP + cyfry lub jest to numer zamówienia
+                Poczta Polska: np. PX1945096838, zaczyna sie zazywczaj od PX
+
             - Data nadania (shipping_date) - format DD.MM.YYYY
             - Planowany termin doręczenia (expected_delivery_date) - format DD.MM.YYYY
             - Adres dostawy (delivery_address)
@@ -1155,6 +1157,28 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                 - Adres paczkomatu
                 - Link do kodu QR lub informację o załączniku zawierającym kod QR
                 - Godziny otwarcia paczkomatu
+                """
+
+            # ... (po bloku dla InPost) ...
+            elif carrier_name.lower() == "inpost":
+                 # ... (kod dla InPost) ...
+                 prompt += "..."
+
+            # ✅ DODAJ TO: Obsługa Poczty Polskiej
+            elif carrier_name.lower() == "pocztapolska":
+                prompt += """
+                Specyficzne instrukcje dla Poczty Polskiej / Pocztex:
+                1. STATUSY:
+                   - Jeśli treść zawiera "została do Ciebie nadana" -> ustaw status "shipment_sent"
+                   - Jeśli treść zawiera "została wydana do doręczenia" -> ustaw status "pickup" (ponieważ kurier jedzie i wymaga PINu)
+                   - Jeśli treść zawiera "awizo" lub "do odbioru w placówce" -> ustaw status "pickup"
+                   - Jeśli treść zawiera "dziękujemy za odbiór" -> ustaw status "delivered"
+                
+                2. DANE DO WYCIĄGNIĘCIA:
+                   - Numer przesyłki: często format PX + cyfry (np. PX1945096838) lub (00)...
+                   - Kod odbioru: szukaj frazy "Kod PIN" (np. 849938) -> wpisz to w polu "pickup_code"
+                   - Telefon kuriera: szukaj frazy "Telefon do kuriera" -> wpisz w "courier_phone"
+                   - W polu "info" połącz telefon kuriera i nadawcę (np. "Kurier tel: 887850473 | Od: CAINIAO")
                 """
 
             # Wywołaj OpenAI API
@@ -1498,6 +1522,35 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                         logging.info(f"Znaleziono sekcję adresu AliExpress: {len(section)} znaków")
                         important_sections.append(section)
                         break
+                    
+            elif carrier_name.lower() == "pocztapolska":
+                logging.info("Rozpoczynam ekstrakcję dla Poczty Polskiej...")
+                
+                # 1. Numer przesyłki (PX... lub (00)...)
+                tracking_patterns = ["PX\\d{10,}", "\\(00\\)\\d{18}", "numer przesyłki", "nr przesyłki"]
+                for pattern in tracking_patterns:
+                    section = self._extract_section(email_body, pattern, 1000)
+                    if section:
+                        logging.info(f"Znaleziono sekcję tracking Poczty: {len(section)} znaków")
+                        important_sections.append(section)
+                        break
+
+                # 2. Kod PIN / Odbiór
+                pickup_patterns = ["Kod PIN", "kod odbioru", "do odbioru w placówce", "awizo"]
+                for pattern in pickup_patterns:
+                    section = self._extract_section(email_body, pattern, 800)
+                    if section:
+                        logging.info(f"Znaleziono sekcję pickup Poczty: {len(section)} znaków")
+                        important_sections.append(section)
+
+                # 3. Statusy
+                status_patterns = ["została do Ciebie nadana", "wydana do doręczenia", "doręczona", "odebrana"]
+                for pattern in status_patterns:
+                    section = self._extract_section(email_body, pattern, 1000)
+                    if section:
+                        logging.info(f"Znaleziono sekcję statusu Poczty: {len(section)} znaków")
+                        important_sections.append(section)
+
             else:
                 logging.info(f"Nieznany przewoźnik {carrier_name}, używam ogólnej strategii...")
                 # Dla nieznanych przewoźników - użyj ogólnej strategii

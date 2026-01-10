@@ -1267,62 +1267,70 @@ class PocztaPolskaDataHandler(BaseDataHandler):
             "info": None
         }
 
-        # 1. Określenie statusu na podstawie treści (priorytety)
+        # 1. Wstępne określenie statusu
         body_lower = body.lower()
-        
         if "dziękujemy za odbiór" in body_lower or "doręczona" in body_lower:
             data["status"] = "delivered"
         elif "wydana do doręczenia" in body_lower or "kod pin" in body_lower:
-            data["status"] = "pickup" # Traktujemy to jako pickup, aby wyróżnić PIN w arkuszu
+            data["status"] = "pickup"
         elif "awizo" in body_lower or "w placówce" in body_lower:
             data["status"] = "pickup"
         elif "została do ciebie nadana" in body_lower or "nadana" in body_lower:
             data["status"] = "shipment_sent"
 
-        # 2. Użycie OpenAI do wyciągnięcia szczegółów
+        # 2. Użycie OpenAI
         try:
             openai_data = self.email_handler.openai_handler.general_extract_carrier_notification_data(
                 body, subject, "PocztaPolska", recipient
             )
             
-            # Jeśli AI zwróciło sensowne dane, nadpisz domyślne
+            # Akceptuj dane z AI tylko jeśli mają sens
             if openai_data and openai_data.get("status") != "unknown":
                 for key, value in openai_data.items():
                     if value and key in data:
                         data[key] = value
                 
-                # Dodatkowe pola z AI, które nie są w standardowym słowniku
                 if openai_data.get("courier_phone"):
                     data["courier_phone"] = openai_data["courier_phone"]
-                
                 if openai_data.get("info"):
                     data["info"] = openai_data["info"]
-                
-                return data
-                
+            else:
+                logging.warning("⚠️ AI zwróciło 'unknown' dla Poczty Polskiej - przechodzę do Regex")
+
         except Exception as e:
             logging.error(f"Błąd AI dla Poczty Polskiej: {e}")
 
-        # 3. Fallback (Regex) - jeśli AI zawiedzie
+        # 3. Fallback (Regex)
         import re
         
-        # Numer przesyłki (PX + cyfry lub standardowy (00)...)
-        track_match = re.search(r'(PX\d{10,})', body)
-        if not track_match:
-            track_match = re.search(r'\(00\)(\d{18})', body)
-        
-        if track_match:
-            data["package_number"] = track_match.group(1)
+        # Numer przesyłki
+        if not data.get("package_number"):
+            track_match = re.search(r'(PX\d{10,})', body)
+            if not track_match:
+                track_match = re.search(r'\(00\)(\d{18})', body)
+            if track_match:
+                data["package_number"] = track_match.group(1)
 
         # Kod PIN
-        pin_match = re.search(r'Kod PIN:\s*(\d{6})', body)
-        if pin_match:
-            data["pickup_code"] = pin_match.group(1)
-            data["status"] = "pickup" 
+        if not data.get("pickup_code"):
+            pin_match = re.search(r'Kod PIN:\s*(\d{6})', body)
+            if pin_match:
+                data["pickup_code"] = pin_match.group(1)
+                data["status"] = "pickup"
 
-        # Telefon do kuriera
-        phone_match = re.search(r'Telefon do kuriera:\s*(\d{9}|\d{3}\s\d{3}\s\d{3})', body)
-        if phone_match:
-            data["courier_phone"] = phone_match.group(1).replace(" ", "")
+        # Telefon kuriera
+        if not data.get("courier_phone"):
+            phone_match = re.search(r'Telefon do kuriera:\s*(\d{9}|\d{3}\s\d{3}\s\d{3})', body)
+            if phone_match:
+                data["courier_phone"] = phone_match.group(1).replace(" ", "")
+
+        # Info fallback
+        if not data.get("info") and (data.get("courier_phone") or "CAINIAO" in body):
+            info_parts = []
+            if data.get("courier_phone"):
+                info_parts.append(f"Kurier tel: {data['courier_phone']}")
+            if "CAINIAO" in body:
+                info_parts.append("Od: CAINIAO")
+            data["info"] = " | ".join(info_parts)
 
         return data

@@ -90,6 +90,11 @@ def main_loop():
         logging.info('🏥 Uruchomiono health check server na porcie 8080')
     except Exception as e:
         logging.warning(f'⚠️ Nie udało się uruchomić health check: {e}')
+        
+    if getattr(config, 'EMAIL_TRACKING_MODE', 'CONFIG') == 'ACCOUNTS':
+        logging.info("🚀 Uruchamianie w trybie ACCOUNTS: Kontrola przez Arkusz Google")
+    else:
+        logging.info("🚀 Uruchamianie w trybie CONFIG: Stała lista z pliku")
 
     while True:
         # ✅ SPRAWDŹ CZY ZAŻĄDANO ZAMKNIĘCIA
@@ -120,7 +125,7 @@ def main_loop():
             limiters.wait_for("imap")
             
             # Pobieranie nowych e-maili
-            processed_emails = email_handler.process_emails()
+            processed_emails = email_handler.process_emails(sheets_handler=sheets_handler)
             logging.info(f"Przetworzono {len(processed_emails)} nowych e-maili")
             
             # ✅ ZWIĘKSZ LICZNIK PRZETWORZONYCH EMAILI
@@ -448,6 +453,9 @@ def show_diagnostic_menu():
         print("14. Pokaż aktualną konfigurację")
         print("15. Stan plików aplikacji")
         print()
+        print("🤖 AI/API:")
+        print("17. Test OpenAI/GitHub Models API")
+        print()
         print("0. Wyjście")
         print("="*50)
         
@@ -750,8 +758,72 @@ def show_diagnostic_menu():
                     import traceback
                     print(f"🔍 Szczegóły: {traceback.format_exc()}")
 
+            case 17:
+                print("\n🤖 === TEST OPENAI/GITHUB MODELS API ===")
+                try:
+                    from openai_handler import OpenAIHandler
+                    
+                    print("🔍 Inicjalizacja OpenAI Handler...")
+                    openai_handler = OpenAIHandler()
+                    
+                    print(f"🔑 API Key: {openai_handler.api_key[:8]}...{openai_handler.api_key[-4:]}")
+                    print(f"🌐 Base URL: {openai_handler.client.base_url}")
+                    
+                    print("\n📤 Wysyłam testowe zapytanie do API...")
+                    print("   Prompt: 'Odpowiedz krótko: Czy API działa?'")
+                    
+                    test_response = openai_handler.client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "system", "content": "Jesteś pomocnym asystentem. Odpowiadaj krótko."},
+                            {"role": "user", "content": "Odpowiedz krótko: Czy API działa?"}
+                        ],
+                        max_tokens=50,
+                        temperature=0.7
+                    )
+                    
+                    response_text = test_response.choices[0].message.content
+                    
+                    print("\n✅ API DZIAŁA POPRAWNIE!")
+                    print(f"📨 Odpowiedź: {response_text}")
+                    print(f"🔢 Model: {test_response.model}")
+                    print(f"💰 Tokens użyte: {test_response.usage.total_tokens}")
+                    print(f"   - Prompt: {test_response.usage.prompt_tokens}")
+                    print(f"   - Completion: {test_response.usage.completion_tokens}")
+                    
+                    print("\n🎯 Test pełnej analizy emaila InPost...")
+                    test_subject = "Paczka 123456789 jest gotowa do odbioru w Paczkomacie"
+                    test_body = """
+                    Twoja paczka o numerze 123456789 czeka na odbiór w Paczkomacie POZ01M.
+                    Adres: ul. Testowa 1, 60-123 Poznań
+                    Kod odbioru: 123456
+                    Termin odbioru: 15.01.2026
+                    """
+                    
+                    print(f"   Temat: {test_subject}")
+                    result = openai_handler.extract_pickup_notification_data_inpost(test_body, test_subject, "test@interia.pl")
+                    
+                    if result and result != {}:
+                        print("\n✅ Analiza zakończona sukcesem!")
+                        print("📊 Wynik analizy:")
+                        print(json.dumps(result, indent=2, ensure_ascii=False))
+                    else:
+                        print("\n⚠️ API zwróciło pusty wynik")
+                        
+                except Exception as e:
+                    print(f"\n❌ BŁĄD API: {e}")
+                    import traceback
+                    print(f"\n🔍 Szczegóły:")
+                    print(traceback.format_exc())
+                    
+                    print("\n💡 Możliwe przyczyny:")
+                    print("   1. Nieprawidłowy klucz API")
+                    print("   2. Nieznany model (używaj 'gpt-4o' dla GitHub Models)")
+                    print("   3. Przekroczony limit requestów")
+                    print("   4. Problem z połączeniem internetowym")
+            
             case _:  # default case
-                print("❌ Nieprawidłowa opcja. Wybierz numer od 0 do 16.")
+                print("❌ Nieprawidłowa opcja. Wybierz numer od 0 do 17.")
         
         input("\n⏎ Naciśnij Enter aby kontynuować...")
 

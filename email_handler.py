@@ -111,25 +111,38 @@ class EmailHandler:
         
     
     
-    def fetch_new_emails(self):
-        """Pobieranie NIEPRZECZYTANYCH e-maili z ostatnich X dni ze wszystkich kont"""
+    def fetch_new_emails(self, email_configs_override=None):
+        """
+        Pobieranie e-maili z ostatnich X dni.
+        Obsługuje tryb PROCESS_READ_EMAILS (czytanie przeczytanych).
+        """
         all_emails = []
-            
+        
+        # Ustal, którą listę sprawdzamy
+        configs = email_configs_override if email_configs_override is not None else config.ALL_EMAIL_CONFIGS
+
         # ✅ UŻYJ KONFIGURACJI Z config.py
         from config import EMAIL_CHECK_SETTINGS
+        import config as app_config  # Import configu aplikacji
+        
         days_back = EMAIL_CHECK_SETTINGS.get('days_back', 14)
-        fallback_limit = EMAIL_CHECK_SETTINGS.get('fallback_limit', 50)
         max_emails = EMAIL_CHECK_SETTINGS.get('max_emails_per_account', 100)
-        mark_as_read = EMAIL_CHECK_SETTINGS.get('mark_as_read', True)  # ✅ NOWA OPCJA
+        mark_as_read = EMAIL_CHECK_SETTINGS.get('mark_as_read', True)
+        
+        # ✅ SPRAWDŹ CZY CZYTAĆ PRZECZYTANE
+        process_read = getattr(app_config, 'PROCESS_READ_EMAILS', False)
+        
+        if process_read:
+            logging.warning("⚠️ TRYB TESTOWY: Pobieranie również PRZECZYTANYCH wiadomości!")
         
         # ✅ OBLICZ DATĘ GRANICZNĄ (X DNI WSTECZ)
         from datetime import datetime, timedelta
         cutoff_date = datetime.now() - timedelta(days=days_back)
-        date_string = cutoff_date.strftime('%d-%b-%Y')  # Format: "15-May-2025"
+        date_string = cutoff_date.strftime('%d-%b-%Y')
         
-        logging.info(f"📅 Sprawdzanie NIEPRZECZYTANYCH emaili od {date_string} ({days_back} dni wstecz)")
+        logging.info(f"📅 Sprawdzanie emaili od {date_string} ({days_back} dni wstecz)")
         
-        for email_config in config.ALL_EMAIL_CONFIGS:
+        for email_config in configs:
             source = email_config.get('source', 'gmail')
             email_addr = email_config.get('email')
             password = email_config.get('password')
@@ -138,142 +151,120 @@ class EmailHandler:
                 logging.warning(f"Pomijanie {source}: brak kompletnej konfiguracji")
                 continue
             
-            logging.info(f"🔍 Sprawdzanie NIEPRZECZYTANYCH emaili {source}: {email_addr}")
+            logging.info(f"🔍 Sprawdzanie emaili {source}: {email_addr}")
             
             client = self.connect_to_email_account(email_config)
             if not client:
                 continue
             
-            # ✅ LISTA EMAILI DO OZNACZENIA JAKO PRZECZYTANE
             emails_to_mark_read = []
                 
             try:
                 client.select("INBOX")
                 
-                # ✅ KOMBINUJ KRYTERIA: UNSEEN + SINCE (NIEPRZECZYTANE Z OSTATNICH X DNI)
+                # ✅ BUDOWANIE KRYTERIÓW WYSZUKIWANIA
+                # Jeśli PROCESS_READ_EMAILS=True, usuwamy 'UNSEEN' z zapytania
+                criteria_prefix = "" if process_read else "UNSEEN "
+                
                 if source.lower() == 'o2':
-                    logging.info(f"🔍 O2: Zastosowanie specjalnych limitów - max 50 NIEPRZECZYTANYCH emaili od {date_string}")
+                    search_criteria = f'({criteria_prefix}SINCE "{date_string}")'
+                    logging.info(f"🔍 O2 Criteria: {search_criteria}")
                     
-                    # ✅ KOMBINUJ UNSEEN + SINCE DLA O2
-                    search_criteria = f'(UNSEEN SINCE "{date_string}")'
                     status, messages = client.search(None, search_criteria)
                     
                     if status == "OK" and messages[0]:
-                        all_unread_list = messages[0].split()
-                        total_unread = len(all_unread_list)
+                        all_list = messages[0].split()
+                        total_found = len(all_list)
+                        logging.info(f"📧 O2: Znaleziono {total_found} emaili")
                         
-                        logging.info(f"📧 O2: Znaleziono {total_unread} nieprzeczytanych emaili z ostatnich {days_back} dni")
-                        
-                        # Weź maksymalnie 50 najnowszych
-                        if total_unread > 50:
-                            messages_to_process = all_unread_list[-50:]  # 50 najnowszych
-                            logging.info(f"📧 O2: Ograniczenie do 50 najnowszych z {total_unread}")
+                        if total_found > 50:
+                            messages_to_process = all_list[-50:]
+                            logging.info(f"📧 O2: Ograniczenie do 50 najnowszych")
                         else:
-                            messages_to_process = all_unread_list
+                            messages_to_process = all_list
                         
                         messages = [b' '.join(messages_to_process)]
                         status = "OK"
                     else:
                         messages = [b'']
                         status = "OK"
-                        logging.info(f"📭 O2: Brak nieprzeczytanych emaili od {date_string}")
-                
                 else:
-                    # ✅ DLA INNYCH KONT - KOMBINUJ UNSEEN + SINCE
-                    search_criteria = f'(UNSEEN SINCE "{date_string}")'
-                    logging.info(f"📅 {source}: Szukanie NIEPRZECZYTANYCH emaili od {date_string}")
+                    search_criteria = f'({criteria_prefix}SINCE "{date_string}")'
+                    logging.info(f"📅 {source} Criteria: {search_criteria}")
                     status, messages = client.search(None, search_criteria)
                 
                 # ✅ PRZETWARZANIE WYNIKÓW
                 if status == "OK" and messages[0]:
                     all_msg_list = messages[0].split()
                     
-                    # Dodatkowe ograniczenie bezpieczeństwa dla wszystkich kont
                     if len(all_msg_list) > max_emails:
-                        messages_to_process = all_msg_list[-max_emails:]  # Najnowsze
-                        logging.info(f"⚠️ Dodatkowe ograniczenie {source}: {len(all_msg_list)} → {max_emails} najnowszych z ostatnich {days_back} dni")
+                        messages_to_process = all_msg_list[-max_emails:]
+                        logging.info(f"⚠️ Dodatkowe ograniczenie {source}: {len(all_msg_list)} -> {max_emails} najnowszych")
                     else:
                         messages_to_process = all_msg_list
                     
-                    logging.info(f"📧 Przetwarzanie {len(messages_to_process)} NIEPRZECZYTANYCH emaili z ostatnich {days_back} dni z {source}")
+                    logging.info(f"📧 Przetwarzanie {len(messages_to_process)} emaili z {source}")
                     
-                    # ✅ SORTUJ EMAILE PO ID (NAJNOWSZE PIERWSZE!)
+                    # Sortowanie od najnowszych
                     messages_to_process.sort(key=lambda x: int(x.decode()), reverse=True)
                     
                     for num in messages_to_process:
                         status, msg_data = client.fetch(num, "(RFC822)")
                         if status == "OK":
                             raw_email = msg_data[0][1]
-                            
                             try:
                                 email_message = email.message_from_bytes(raw_email)
-                            except UnicodeDecodeError:
+                            except:
                                 try:
-                                    decoded_content = raw_email.decode('iso-8859-2')
-                                    email_message = email.message_from_string(decoded_content)
-                                except Exception:
                                     decoded_content = raw_email.decode('utf-8', errors='ignore')
                                     email_message = email.message_from_string(decoded_content)
+                                except:
+                                    continue
                             
-                            # ✅ SPRAWDŹ DATĘ EMAILA PRZED DODANIEM
                             email_date = self.extract_email_date(email_message)
 
-                            # ✅ DEKODUJ TEMAT PRZED LOGOWANIEM
                             try:
                                 raw_subject = email_message.get('Subject', 'Brak tematu')
-                                logging.debug(f"🔍 RAW subject: {raw_subject}")
-                                
-                                # ✅ UŻYJ NOWEJ FUNKCJI
                                 email_subject = self.decode_email_subject(raw_subject)
-                                logging.debug(f"🔍 DEKODOWANY TEMAT: '{email_subject}'")
-                                
-                            except Exception as e:
-                                logging.error(f"❌ Błąd podczas dekodowania tematu: {e}")
-                                email_subject = str(email_message.get('Subject', 'Brak tematu'))
+                            except:
+                                email_subject = "Brak tematu"
 
-                            # ✅ TERAZ LOGUJ Z DEKODOWANYM TEMATEM
                             logging.info(f"📧 Email ID {num.decode()}: {email_date} | {email_subject}")
 
-                            # ✅ DODATKOWA WERYFIKACJA DATY (PODWÓJNE SPRAWDZENIE)
                             if email_date:
                                 email_dt = datetime.strptime(email_date, '%Y-%m-%d %H:%M:%S')
                                 if email_dt < cutoff_date:
                                     logging.info(f"⏭️ Email z {email_date} starszy niż {days_back} dni - pomijam")
-                                    # ✅ DODAJ DO LISTY DO OZNACZENIA JAKO PRZECZYTANE (NAWET JEŚLI POMIJAMY)
-                                    emails_to_mark_read.append(num)
+                                    if not process_read: # Oznaczamy stare jako przeczytane tylko w trybie normalnym
+                                        emails_to_mark_read.append(num)
                                     continue
 
                             all_emails.append((source, email_message))
-                            # ✅ DODAJ EMAIL DO LISTY DO OZNACZENIA JAKO PRZECZYTANE
-                            emails_to_mark_read.append(num)
+                            
+                            # W trybie normalnym oznaczamy jako przeczytane
+                            if not process_read:
+                                emails_to_mark_read.append(num)
                 else:
-                    logging.info(f"📭 Brak nieprzeczytanych emaili z ostatnich {days_back} dni w {source}")
+                    logging.info(f"📭 Brak emaili spełniających kryteria w {source}")
                     
             except Exception as e:
-                logging.warning(f"⚠️ Błąd wyszukiwania nieprzeczytanych z zakresu dat dla {source}: {e}")
-                # W przypadku błędu, nie oznaczaj emaili jako przeczytane
+                logging.warning(f"⚠️ Błąd wyszukiwania dla {source}: {e}")
                 emails_to_mark_read = []
                     
             finally:
-                # ✅ OZNACZ EMAILE JAKO PRZECZYTANE PRZED ZAMKNIĘCIEM POŁĄCZENIA
+                # Oznaczaj jako przeczytane TYLKO jeśli nie jesteśmy w trybie "czytaj wszystko"
+                # lub jeśli chcesz, żeby po odczytaniu zniknęły z "nieprzeczytanych" na przyszłość
                 if mark_as_read and emails_to_mark_read:
                     try:
                         logging.info(f"📖 Oznaczanie {len(emails_to_mark_read)} emaili jako przeczytane w {source}")
-                        
                         for num in emails_to_mark_read:
                             try:
-                                # Oznacz email jako przeczytany
                                 client.store(num, '+FLAGS', '\\Seen')
-                                logging.debug(f"✅ Email {num.decode()} oznaczony jako przeczytany")
-                            except Exception as e:
-                                logging.warning(f"⚠️ Nie udało się oznaczyć emaila {num.decode()} jako przeczytany: {e}")
-                        
-                        # Zapisz zmiany na serwerze
+                            except:
+                                pass
                         client.expunge()
-                        logging.info(f"✅ Zapisano zmiany dla {len(emails_to_mark_read)} emaili w {source}")
-                        
                     except Exception as e:
-                        logging.error(f"❌ Błąd podczas oznaczania emaili jako przeczytane w {source}: {e}")
+                        logging.error(f"❌ Błąd oznaczania emaili: {e}")
                 
                 try:
                     client.close()
@@ -281,26 +272,71 @@ class EmailHandler:
                 except:
                     pass
         
-        logging.info(f"📧 Łącznie pobrano {len(all_emails)} NIEPRZECZYTANYCH emaili z ostatnich {days_back} dni ze wszystkich kont")
+        logging.info(f"📧 Łącznie pobrano {len(all_emails)} emaili")
         return all_emails
     
     def get_email_body(self, email_message):
-        """Wydobycie treści e-maila"""
+        """
+        Wydobycie treści e-maila z obsługą polskich kodowań (naprawa pustych maili od Poczty Polskiej).
+        """
         body = ""
-        if email_message.is_multipart():
-            for part in email_message.walk():
-                content_type = part.get_content_type()
-                if content_type == "text/plain" or content_type == "text/html":
+        try:
+            if email_message.is_multipart():
+                for part in email_message.walk():
+                    content_type = part.get_content_type()
+                    content_disposition = str(part.get("Content-Disposition"))
+                    
+                    # Pomiń załączniki
+                    if "attachment" in content_disposition:
+                        continue
+                        
+                    if content_type == "text/plain" or content_type == "text/html":
+                        try:
+                            payload = part.get_payload(decode=True)
+                            charset = part.get_content_charset()
+                            
+                            if charset:
+                                try:
+                                    body += payload.decode(charset, errors="replace")
+                                except (LookupError, UnicodeDecodeError):
+                                    # Jeśli podany charset jest błędny, próbuj standardowych
+                                    try:
+                                        body += payload.decode("utf-8")
+                                    except:
+                                        body += payload.decode("iso-8859-2", errors="replace")
+                            else:
+                                # Brak informacji o kodowaniu - zgaduj
+                                try:
+                                    body += payload.decode("utf-8")
+                                except:
+                                    try:
+                                        body += payload.decode("iso-8859-2")
+                                    except:
+                                        body += payload.decode("windows-1250", errors="replace")
+                        except Exception as e:
+                            logging.warning(f"Błąd dekodowania części maila: {e}")
+            else:
+                # Nie jest multipart (pojedyncza wiadomość)
+                payload = email_message.get_payload(decode=True)
+                charset = email_message.get_content_charset()
+                
+                if charset:
                     try:
-                        body_part = part.get_payload(decode=True).decode()
-                        body += body_part
-                    except Exception:
-                        pass
-        else:
-            try:
-                body = email_message.get_payload(decode=True).decode()
-            except Exception:
-                pass
+                        body = payload.decode(charset, errors="replace")
+                    except (LookupError, UnicodeDecodeError):
+                        body = payload.decode("iso-8859-2", errors="replace")
+                else:
+                    try:
+                        body = payload.decode("utf-8")
+                    except:
+                        try:
+                            body = payload.decode("iso-8859-2")
+                        except:
+                            body = payload.decode("windows-1250", errors="replace")
+                            
+        except Exception as e:
+            logging.error(f"Krytyczny błąd pobierania treści maila: {e}")
+            
         return body
     
     def extract_email_date(self, email_message):
@@ -372,9 +408,48 @@ class EmailHandler:
             # W przypadku błędu, aktualizuj żeby nie blokować procesu
             return True
 
-    def process_emails(self):
-        """Przetwarzanie wszystkich nowych e-maili Z DATAMI - OD NAJNOWSZYCH"""
-        emails = self.fetch_new_emails()
+    def process_emails(self, sheets_handler=None):
+        """
+        Przetwarzanie nowych e-maili z uwzględnieniem trybu CONFIG/ACCOUNTS.
+        """
+        import config
+        
+        # 1. Pobierz wszystkie dostępne konfiguracje z pliku
+        all_configs = config.ALL_EMAIL_CONFIGS
+        configs_to_check = []
+
+        # 2. Sprawdź tryb działania
+        mode = getattr(config, 'EMAIL_TRACKING_MODE', 'CONFIG')
+
+        if mode == 'ACCOUNTS' and sheets_handler:
+            logging.info("🔄 Tryb pracy: ACCOUNTS (Pobieranie listy z arkusza)")
+            
+            # Pobierz listę maili z arkusza
+            from carriers_sheet_handlers import EmailAvailabilityManager
+            email_manager = EmailAvailabilityManager(sheets_handler)
+            allowed_emails = email_manager.get_emails_from_accounts_sheet()
+            
+            if allowed_emails:
+                # Filtruj: bierzemy z configu tylko te, które są w arkuszu
+                for cfg in all_configs:
+                    if cfg['email'].strip().lower() in allowed_emails:
+                        configs_to_check.append(cfg)
+                
+                logging.info(f"✅ Wybrano {len(configs_to_check)} kont do sprawdzenia (na podstawie Arkusza)")
+            else:
+                logging.warning("⚠️ Arkusz Accounts jest pusty lub niedostępny. Sprawdzam wszystkie z configu.")
+                configs_to_check = all_configs
+        else:
+            # Stary tryb lub brak handlera arkusza
+            if mode == 'ACCOUNTS' and not sheets_handler:
+                 logging.warning("⚠️ Tryb ACCOUNTS wymaga sheets_handler, ale go brak. Używam trybu CONFIG.")
+            
+            logging.info("🔄 Tryb pracy: CONFIG (Wszystkie maile z pliku)")
+            configs_to_check = all_configs
+
+        # ✅ TUTAJ BYŁA ZMIANA - PRZEKAZANIE LISTY KONT:
+        emails = self.fetch_new_emails(email_configs_override=configs_to_check)
+        
         processed_data = []
         
         # ✅ SORTUJ EMAILE PO DATACH (NAJNOWSZE PIERWSZE!)
@@ -406,6 +481,7 @@ class EmailHandler:
                 
                 # Wyciągnij adres email z nagłówka To
                 to_header = email_msg.get("To", "")
+                import re
                 email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', to_header)
                 recipient = email_match.group(0) if email_match else None
                 recipient_name = self.extract_recipient_name(to_header)

@@ -1746,315 +1746,111 @@ class ShippingManager:
             logging.warning(f"Nieobsługiwany przewoźnik: {carrier_name}")
             return None
 
+# W pliku carriers_sheet_handlers.py (na końcu)
+
 class EmailAvailabilityManager:
-    """Klasa zarządzająca dostępnością maili do zamawiania"""
+    """Zarządza zakładką 'Accounts'"""
     
     def __init__(self, sheets_handler):
         self.sheets_handler = sheets_handler
-        self.accounts_worksheet = None
-        self._initialized = False  # ✅ DODAJ FLAGĘ
-        
-        # ✅ NOWE USTAWIENIA - ZAKŁADKA ACCOUNTS
-        self.email_column = 1
-        self.order_email_column = 1
-        self.status_column = 9
-        
-        # Kolory dla dostępności maili
-        self.availability_colors = {
-            "available": {"red": 1.0, "green": 1.0, "blue": 1.0},
-            "occupied": {"red": 1.0, "green": 0.8, "blue": 0.8}
-        }
-        
-        # ✅ INICJALIZUJ OD RAZU
+        self.worksheet = None
         self._init_accounts_worksheet()
-        self._initialized = True
-    
-    def _ensure_initialized(self):
-        """Upewnia się, że zakładka Accounts jest zainicjalizowana"""
-        if not self._initialized:
-            self._init_accounts_worksheet()
-            self._initialized = True
-    
+
     def _init_accounts_worksheet(self):
-        """Inicjalizuje dostęp do zakładki Accounts"""
+        """Próbuje połączyć się z zakładką Accounts"""
         try:
-            # ✅ SPRAWDŹ CZY WORKSHEET JEST DOSTĘPNY
-            if not hasattr(self.sheets_handler, 'worksheet') or not self.sheets_handler.worksheet:
-                logging.error("❌ SheetsHandler nie ma dostępu do worksheet - pomiń inicjalizację")
-                return
-                
-            # Pobierz spreadsheet z worksheet
-            spreadsheet = self.sheets_handler.worksheet.spreadsheet
+            self.worksheet = self.sheets_handler.spreadsheet.worksheet("Accounts")
+        except:
+            logging.warning("Nie znaleziono zakładki 'Accounts'.")
+            self.worksheet = None
+
+    def get_emails_from_accounts_sheet(self):
+        """
+        Pobiera listę emaili z kolumny A w zakładce Accounts.
+        Zwraca listę stringów (samych adresów).
+        """
+        if not self.worksheet:
+            self._init_accounts_worksheet()
+            if not self.worksheet:
+                return []
             
-            # Spróbuj znaleźć zakładkę "Accounts"
-            try:
-                self.accounts_worksheet = spreadsheet.worksheet("Accounts")
-                logging.debug("✅ Znaleziono zakładkę 'Accounts'")
-            except:
-                # Jeśli nie istnieje, utwórz ją
-                logging.info("📝 Tworzenie nowej zakładki 'Accounts'...")
-                self.accounts_worksheet = spreadsheet.add_worksheet(title="Accounts", rows=100, cols=5)
-                
-                # Dodaj nagłówki
-                headers = ["Available Emails", "Status", "Last Used", "Notes", "Type"]
-                self.accounts_worksheet.update("A1:E1", [headers])
-                
-                # Sformatuj nagłówki
-                self.accounts_worksheet.format("A1:E1", {
-                    "backgroundColor": {"red": 0.8, "green": 0.8, "blue": 0.8},
-                    "textFormat": {"bold": True}
-                })
-                
-                logging.info("✅ Utworzono zakładkę 'Accounts' z nagłówkami")
-                
+        try:
+            email_column = self.worksheet.col_values(1)
+            # Pomiń nagłówek i puste wiersze
+            emails = [email.strip().lower() for email in email_column[1:] if email.strip()]
+            logging.info(f"📋 Wczytano {len(emails)} aktywnych kont z zakładki Accounts")
+            return emails
         except Exception as e:
-            logging.error(f"❌ Błąd podczas inicjalizacji zakładki Accounts: {e}")
-            self.accounts_worksheet = None
+            logging.error(f"Błąd pobierania emaili z Accounts: {e}")
+            return []
 
     def check_email_availability(self):
         """
-        Sprawdza dostępność wszystkich maili w zakładce Accounts i koloruje je odpowiednio
+        Sprawdza dostępność maili (czy są zajęte przez aktywne zamówienia)
+        i aktualizuje statusy/kolory w zakładce Accounts.
         """
+        if not self.worksheet:
+            return
+
         try:
-            self._ensure_initialized()
-            
-            if not self.accounts_worksheet:
-                logging.error("❌ Brak dostępu do zakładki Accounts")
-                return False
-                
             logging.info("🔍 Sprawdzanie dostępności maili w zakładce Accounts...")
             
-            # Pobierz wszystkie maile z zakładki Accounts (tylko raz)
-            accounts_data = self.accounts_worksheet.get_all_values()
-            if len(accounts_data) <= 1:
-                logging.info("📧 Brak maili w zakładce Accounts")
-                return True
+            # 1. Pobierz aktywne zamówienia z głównego arkusza
+            main_sheet = self.sheets_handler.worksheet
+            all_orders = main_sheet.get_all_values()
             
-            logging.info(f"Znaleziono {len(accounts_data)-1} maili w zakładce Accounts do sprawdzenia")
+            # Zbiór zajętych maili (mają aktywne zamówienie)
+            busy_emails = set()
             
-            # Pobierz wszystkie zamówienia z głównej zakładki (tylko raz)
-            main_data = self.sheets_handler.worksheet.get_all_values()
-            
-            # ✅ ROZSZERZONA LISTA STATUSÓW ZAKOŃCZONYCH
-            delivered_statuses = [
-                # Podstawowe statusy
-                "dostarczona",
-                "delivered", 
-                "dostarczono",
-                "odebrana",
-                "picked up",
-                "closed",
-                "zamknięte",
-                "anulowana",
-                "canceled",
-                "cancelled",
-                
-                # ✅ STATUSY Z PRZEWOŹNIKAMI
-                "dostarczona (dpd)",
-                "dostarczona (dhl)", 
-                "dostarczona (aliexpress)",
-                "dostarczona (inpost)",
-                "dostarczono (dpd)",
-                "dostarczono (dhl)",
-                "dostarczono (aliexpress)", 
-                "dostarczono (inpost)",
-                "delivered (dpd)",
-                "delivered (dhl)",
-                "delivered (aliexpress)",
-                "delivered (inpost)",
-                
-                # ✅ DODATKOWE WARIANTY
-                "paczka dostarczona",
-                "przesyłka dostarczona",
-                "zamówienie dostarczone",
-                "zamówienie zakończone",
-                "completed",
-                "finished",
-                "done"
+            # Statusy, które oznaczają, że zamówienie jest ZAKOŃCZONE (email wolny)
+            finished_statuses = [
+                "delivered", "dostarczona", "dostarczono", 
+                "odebrana", "zwrócona", "anulowana", "canceled", "closed"
             ]
             
-            # ✅ FUNKCJA SPRAWDZAJĄCA CZY STATUS OZNACZA ZAKOŃCZENIE
-            def is_order_finished(status_text):
-                """Sprawdza czy status oznacza zakończone zamówienie"""
-                if not status_text:
-                    return False
-                    
-                status_lower = status_text.strip().lower()
-                
-                # ✅ SPRAWDŹ WZORCE "STATUS NIEZNANY"
-                if "status nieznany:" in status_lower:
-                    # Wyciągnij rzeczywisty status po dwukropku
-                    actual_status = status_lower.split("status nieznany:")[-1].strip()
-                    logging.debug(f"🔍 Wykryto wzorzec 'status nieznany', sprawdzam: '{actual_status}'")
-                    
-                    finished_statuses = ["closed", "canceled", "cancelled", "delivered", "completed"]
-                    if actual_status in finished_statuses:
-                        logging.info(f"✅ Status '{actual_status}' oznacza zakończone zamówienie")
-                        return True
-                
-                # ✅ STANDARDOWE SPRAWDZANIE
-                finished_keywords = [
-                    "dostarczona", "delivered", "dostarczono",
-                    "odebrana", "picked up", "completed",
-                    "closed", "zamknięte", "finished",
-                    "anulowana", "canceled", "cancelled",
-                    "zwrócona", "returned", "done"
-                ]
-                
-                for keyword in finished_keywords:
-                    if keyword in status_lower:
-                        logging.debug(f"🔍 Status '{status_text}' zawiera słowo kluczowe '{keyword}' - zamówienie zakończone")
-                        return True
-                        
-                return False
-            
-            # ✅ ZBIERZ TYLKO ZAJĘTE EMAILE (WYKLUCZAJĄC DOSTARCZONE)
-            used_emails = set()
-            
-            for row in main_data[1:]:  # Pomijamy nagłówek
-                if len(row) > max(self.order_email_column-1, self.status_column-1):
-                    email = row[self.order_email_column-1].strip().lower() if len(row) > self.order_email_column-1 and row[self.order_email_column-1] else ""
-                    status = row[self.status_column-1].strip() if len(row) > self.status_column-1 and row[self.status_column-1] else ""
+            # Przeiteruj przez zamówienia (pomiń nagłówek)
+            for row in all_orders[1:]:
+                if len(row) >= 9: # Upewnij się, że wiersz ma kolumny
+                    email = row[0].strip().lower() # Kolumna A: Email
+                    status = row[8].strip().lower() # Kolumna I: Status (indeks 8)
                     
                     if email:
-                        # ✅ UŻYJ INTELIGENTNEJ FUNKCJI
-                        if not is_order_finished(status):
-                            # Tylko aktywne zamówienia oznaczają zajęty email
-                            used_emails.add(email)
-                            logging.debug(f"📧 Email zajęty: {email} (status: {status})")
-                        else:
-                            logging.debug(f"📧 Email dostępny: {email} (status zakończony: {status})")
-        
-            logging.info(f"📧 Znaleziono {len(used_emails)} zajętych emaili (aktywne zamówienia)")
+                        # Sprawdź czy status oznacza zakończenie
+                        is_finished = any(s in status for s in finished_statuses)
+                        
+                        if not is_finished:
+                            # Jeśli nie zakończone = email zajęty
+                            busy_emails.add(email)
+
+            # 2. Zaktualizuj zakładkę Accounts
+            accounts_data = self.worksheet.get_all_values()
             
-            # ✅ PRZYGOTUJ WSZYSTKIE AKTUALIZACJE W BATCH
-            batch_updates = []
-            color_requests = []
+            # Przygotuj listę update'ów (dla wydajności)
+            updates = []
             
-            for i, row in enumerate(accounts_data[1:], start=2):  # Zaczynamy od wiersza 2
-                if len(row) > 0 and row[0]:
-                    email = row[0].strip().lower()
-                    is_available = email not in used_emails
-                    
-                    # Status
-                    status = "wolny" if is_available else "-"
-                    batch_updates.append({
-                        'range': f'B{i}',
-                        'values': [[status]]
-                    })
-                    
-                    # Kolor
-                    color = self.availability_colors["available"] if is_available else self.availability_colors["occupied"]
-                    color_requests.append({
-                        "repeatCell": {
-                            "range": {
-                                "sheetId": self.accounts_worksheet.id,
-                                "startRowIndex": i-1,
-                                "endRowIndex": i,
-                                "startColumnIndex": 0,
-                                "endColumnIndex": 2
-                            },
-                            "cell": {
-                                "userEnteredFormat": {
-                                    "backgroundColor": color
-                                }
-                            },
-                            "fields": "userEnteredFormat.backgroundColor"
-                        }
-                    })
-            
-            # ✅ WYKONAJ WSZYSTKIE AKTUALIZACJE JEDNORAZOWO
-            if batch_updates:
-                logging.info(f"📝 Wykonywanie batch update dla {len(batch_updates)} statusów...")
-                self.accounts_worksheet.batch_update(batch_updates)
-            
-            if color_requests:
-                logging.info(f"🎨 Wykonywanie batch kolorowania dla {len(color_requests)} wierszy...")
-                self.accounts_worksheet.spreadsheet.batch_update({
-                    "requests": color_requests
+            for i, row in enumerate(accounts_data[1:], start=2): # start=2 bo wiersz 1 to nagłówek
+                if not row: continue
+                
+                email = row[0].strip().lower()
+                if not email: continue
+                
+                is_busy = email in busy_emails
+                status_text = "ZAJĘTY" if is_busy else "WOLNY"
+                
+                # Aktualizuj kolumnę B (Status)
+                self.worksheet.update_cell(i, 2, status_text)
+                
+                # Kolorowanie (Czerwony=Zajęty, Zielony=Wolny)
+                color = {"red": 1.0, "green": 0.8, "blue": 0.8} if is_busy else {"red": 0.8, "green": 1.0, "blue": 0.8}
+                
+                self.worksheet.format(f"A{i}:B{i}", {
+                    "backgroundColor": color
                 })
             
-            available_count = sum(1 for row in accounts_data[1:] if len(row) > 0 and row[0] and row[0].strip().lower() not in used_emails)
-            occupied_count = len(accounts_data) - 1 - available_count
-            
-            logging.info(f"✅ Zaktualizowano dostępność {len(accounts_data)-1} maili: {available_count} dostępnych, {occupied_count} zajętych")
-            return True
-            
-        except Exception as e:
-            logging.error(f"❌ Błąd podczas sprawdzania dostępności maili: {e}")
-            return False
-
-    def get_available_emails(self):
-        """Zwraca listę dostępnych maili z zakładki Accounts"""
-        try:
-            # ✅ UPEWNIJ SIĘ, ŻE JEST ZAINICJALIZOWANE
-            self._ensure_initialized()
-            
-            if not self.accounts_worksheet:
-                logging.error("❌ Brak dostępu do zakładki Accounts")
-                return []
+            logging.info(f"✅ Zaktualizowano dostępność maili. Zajętych: {len(busy_emails)}")
                 
-            # Pobierz wszystkie dane
-            all_data = self.accounts_worksheet.get_all_values()
-            if len(all_data) <= 1:
-                return []
-            
-            # Zbierz dostępne emaile
-            available_emails = []
-            for row in all_data[1:]:  # Pomijamy nagłówek
-                if len(row) > 0 and row[0]:
-                    email = row[0].strip().lower()
-                    status = row[1].strip().lower() if len(row) > 1 else ""
-                    
-                    # Dodaj tylko dostępne emaile
-                    if status == "ok" or status == "dostępny":
-                        available_emails.append(email)
-            
-            logging.info(f"📧 Znaleziono {len(available_emails)} dostępnych maili")
-            return available_emails
-            
         except Exception as e:
-            logging.error(f"Błąd podczas pobierania dostępnych maili: {e}")
-            return []
-    
-    def add_email_to_accounts(self, email, email_type="Gmail"):
-        """Dodaje nowy email do zakładki Accounts"""
-        try:
-            # ✅ UPEWNIJ SIĘ, ŻE JEST ZAINICJALIZOWANE
-            self._ensure_initialized()
-            
-            if not self.accounts_worksheet:
-                logging.error("❌ Brak dostępu do zakładki Accounts")
-                return False
-                
-            # Sprawdź czy email już istnieje
-            existing_row = self._find_row_by_email(email)
-            if existing_row:
-                logging.info(f"Email {email} już istnieje w zakładce Accounts (wiersz {existing_row})")
-                return True
-            
-            # Znajdź pierwszy wolny wiersz
-            values = self.accounts_worksheet.get_all_values()
-            next_row = len(values) + 1
-            
-            # Dodaj nowy email
-            self.accounts_worksheet.update_cell(next_row, self.email_column, email)
-            self.accounts_worksheet.update_cell(next_row, self.order_email_column, email)  # Duplikuj w kolumnie B
-            
-            # Ustaw domyślny status jako "OK"
-            self.accounts_worksheet.update_cell(next_row, self.status_column, "OK")
-            
-            # Zastosuj kolor
-            self.accounts_worksheet.format(f"A{next_row}:C{next_row}", {
-                "backgroundColor": self.availability_colors["available"]
-            })
-            
-            logging.info(f"✅ Dodano nowy email do zakładki Accounts: {email}")
-            return True
-            
-        except Exception as e:
-            logging.error(f"❌ Błąd podczas dodawania emaila: {e}")
-            return False
+            logging.error(f"Błąd podczas sprawdzania dostępności maili: {e}")
 
 class GLSCarrier(BaseCarrier):
     """Klasa obsługująca przewoźnika GLS"""

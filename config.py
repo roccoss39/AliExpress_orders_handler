@@ -4,6 +4,16 @@ from dotenv import load_dotenv
 # Załaduj zmienne środowiskowe z pliku .env
 load_dotenv()
 
+# Tryb śledzenia emaili:
+# 'CONFIG'   - sprawdza wszystkie maile zdefiniowane w ALL_EMAIL_CONFIGS (stara metoda)
+# 'ACCOUNTS' - sprawdza tylko maile wpisane w zakładce "Accounts" w Google Sheets
+EMAIL_TRACKING_MODE = 'ACCOUNTS'
+
+# Czy przetwarzać również przeczytane maile?
+# True = Pobiera wszystko z ostatnich dni (UWAGA: zużywa więcej tokenów AI)
+# False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
+PROCESS_READ_EMAILS = True
+
 # Ustawienia kont e-mail
 GMAIL_EMAIL = os.getenv('GMAIL_EMAIL_1')
 GMAIL_PASSWORD = os.getenv('GMAIL_PASSWORD_1')
@@ -66,7 +76,13 @@ ALL_EMAIL_CONFIGS = [
         'email': os.getenv('O2_EMAIL_1'),
         'password': os.getenv('O2_PASSWORD_1'),
         'source': "o2"
-    }
+    },
+    {
+        'email': "deszcz.zczsed@interia.pl",
+        'password': INTERIA_PASSWORD,
+        'source': "interia"
+    },
+    
 ]
 
 # ✅ KONFIGURACJA OKRESÓW SPRAWDZANIA
