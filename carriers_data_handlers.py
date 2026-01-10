@@ -1220,3 +1220,109 @@ class GLSDataHandler(BaseDataHandler):
             logging.error(f"Błąd podczas przetwarzania powiadomienia GLS o dostarczeniu: {e}")
         
         return data
+
+# Dodaj to na końcu pliku carriers_data_handlers.py
+
+class PocztaPolskaDataHandler(BaseDataHandler):
+    """Klasa do obsługi danych z emaili od Poczty Polskiej / Pocztex"""
+    
+    def __init__(self, email_handler):
+        super().__init__(email_handler)
+        self.name = "PocztaPolska"
+    
+    def can_handle(self, subject, body):
+        """Sprawdza czy email pochodzi od Poczty Polskiej"""
+        keywords = [
+            "poczta polska", 
+            "pocztex", 
+            "e-info",
+            "informacja@poczta-polska.pl",
+            "przesyłka o numerze px",
+            "wydana do doręczenia"
+        ]
+        
+        subject_lower = subject.lower()
+        body_lower = body.lower()[:1000] 
+        
+        for keyword in keywords:
+            if keyword in subject_lower or keyword in body_lower:
+                logging.info(f"✅ Poczta Polska: Znaleziono keyword '{keyword}'")
+                return True
+        return False
+    
+    def process(self, subject, body, recipient, email_source, recipient_name=None):
+        """Przetwarza email od Poczty Polskiej"""
+        
+        # Dane domyślne
+        data = {
+            "email": recipient,
+            "email_source": email_source,
+            "status": "transit", 
+            "customer_name": recipient_name,
+            "user_key": recipient.split('@')[0] if recipient else "unknown",
+            "carrier": "PocztaPolska",
+            "package_number": None,
+            "pickup_code": None,      # PIN
+            "courier_phone": None,    # Telefon kuriera
+            "info": None
+        }
+
+        # 1. Określenie statusu na podstawie treści (priorytety)
+        body_lower = body.lower()
+        
+        if "dziękujemy za odbiór" in body_lower or "doręczona" in body_lower:
+            data["status"] = "delivered"
+        elif "wydana do doręczenia" in body_lower or "kod pin" in body_lower:
+            data["status"] = "pickup" # Traktujemy to jako pickup, aby wyróżnić PIN w arkuszu
+        elif "awizo" in body_lower or "w placówce" in body_lower:
+            data["status"] = "pickup"
+        elif "została do ciebie nadana" in body_lower or "nadana" in body_lower:
+            data["status"] = "shipment_sent"
+
+        # 2. Użycie OpenAI do wyciągnięcia szczegółów
+        try:
+            openai_data = self.email_handler.openai_handler.general_extract_carrier_notification_data(
+                body, subject, "PocztaPolska", recipient
+            )
+            
+            # Jeśli AI zwróciło sensowne dane, nadpisz domyślne
+            if openai_data and openai_data.get("status") != "unknown":
+                for key, value in openai_data.items():
+                    if value and key in data:
+                        data[key] = value
+                
+                # Dodatkowe pola z AI, które nie są w standardowym słowniku
+                if openai_data.get("courier_phone"):
+                    data["courier_phone"] = openai_data["courier_phone"]
+                
+                if openai_data.get("info"):
+                    data["info"] = openai_data["info"]
+                
+                return data
+                
+        except Exception as e:
+            logging.error(f"Błąd AI dla Poczty Polskiej: {e}")
+
+        # 3. Fallback (Regex) - jeśli AI zawiedzie
+        import re
+        
+        # Numer przesyłki (PX + cyfry lub standardowy (00)...)
+        track_match = re.search(r'(PX\d{10,})', body)
+        if not track_match:
+            track_match = re.search(r'\(00\)(\d{18})', body)
+        
+        if track_match:
+            data["package_number"] = track_match.group(1)
+
+        # Kod PIN
+        pin_match = re.search(r'Kod PIN:\s*(\d{6})', body)
+        if pin_match:
+            data["pickup_code"] = pin_match.group(1)
+            data["status"] = "pickup" 
+
+        # Telefon do kuriera
+        phone_match = re.search(r'Telefon do kuriera:\s*(\d{9}|\d{3}\s\d{3}\s\d{3})', body)
+        if phone_match:
+            data["courier_phone"] = phone_match.group(1).replace(" ", "")
+
+        return data

@@ -3,8 +3,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import config
 import logging
 import re
-from carriers_sheet_handlers import InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier
-
+from carriers_sheet_handlers import InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier 
 class SheetsHandler:
     _instance = None
     _spreadsheet = None
@@ -61,6 +60,7 @@ class SheetsHandler:
             self.carriers["AliExpress"] = AliExpressCarrier(self)
             self.carriers["DPD"] = DPDCarrier(self)
             self.carriers["GLS"] = GLSCarrier(self)  # Dodano GLS
+            self.carriers["PocztaPolska"] = PocztaPolskaCarrier(self)
             
             self.connected = True
             

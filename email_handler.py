@@ -42,8 +42,9 @@ class EmailHandler:
             self.user_mappings = {}
 
         # Inicjalizacja handlerów danych - ✅ POPRAWIONA KOLEJNOŚĆ
-        from carriers_data_handlers import AliexpressDataHandler, InPostDataHandler, DHLDataHandler, DPDDataHandler, GLSDataHandler
+        from carriers_data_handlers import AliexpressDataHandler, InPostDataHandler, DHLDataHandler, DPDDataHandler, GLSDataHandler, PocztaPolskaDataHandler
         self.data_handlers = [
+            PocztaPolskaDataHandler(self),
             GLSDataHandler(self),           # ✅ GLS NAJPIERW!
             InPostDataHandler(self),        # InPost ma specyficzne wzorce
             DHLDataHandler(self),           # DHL ma specyficzne wzorce

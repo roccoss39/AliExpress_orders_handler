@@ -2463,3 +2463,23 @@ class DeliveredOrdersManager:
             logging.error(f"❌ Błąd podczas przenoszenia dostarczonego zamówienia: {e}")
             return False
 
+# Dodaj to na końcu pliku carriers_sheet_handlers.py
+
+class PocztaPolskaCarrier(BaseCarrier):
+    """Klasa obsługująca przewoźnika Poczta Polska"""
+    
+    def __init__(self, sheets_handler):
+        super().__init__(sheets_handler)
+        self.name = "PocztaPolska"
+        # Kolory dla Poczty Polskiej (czerwony brand)
+        self.colors = {
+            "shipment_sent": {"red": 1.0, "green": 0.9, "blue": 0.9}, # Jasny czerwony
+            "pickup": {"red": 1.0, "green": 0.6, "blue": 0.6},       # Czerwony - Awizo/Odbiór
+            "delivered": {"red": 0.8, "green": 0.95, "blue": 0.8},    # Zielony
+            "transit": {"red": 0.95, "green": 0.9, "blue": 0.9},      # Szarawy
+            "closed": {"red": 1.0, "green": 0.2, "blue": 0.2}
+        }
+
+    # Ponieważ dziedziczymy po BaseCarrier, metody update_pickup, update_delivered itp. 
+    # zadziałają automatycznie (używając metody general_update_sheet_data z BaseCarrier).
+    # Nie musimy ich tu pisać, chyba że chcemy specyficznego zachowania.
