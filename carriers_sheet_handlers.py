@@ -63,37 +63,46 @@ class BaseCarrier:
 
     def update_shipment_sent(self, row, order_data):
         """
-        Specjalna obsługa statusu shipment_sent z zabezpieczeniem przed nadpisaniem innej paczki.
+        Aktualizuje wiersz dla statusu 'shipment_sent'.
+        Ignoruje konflikty numerów paczek - nadpisuje stary numer nowym (obsługa zmiany przewoźnika).
         """
         try:
-            # 1. Pobierz istniejące dane z wiersza
+            # 1. Pobierz obecne dane
             existing_values = self.sheets_handler.worksheet.row_values(row)
-            # Uzupełnij do 15 kolumn
             while len(existing_values) < 15: existing_values.append("")
             
-            # Pobierz surową wartość z arkusza
-            raw_existing_pkg = existing_values[14].strip() # Kolumna O
-            new_pkg = order_data.get("package_number", "").strip()
+            existing_pkg = existing_values[14] # Kolumna O
+            new_pkg = order_data.get("package_number")
             
-            # ✅ CZYSZCZENIE PRZED PORÓWNANIEM (Usuń apostrofy ' i ")
-            clean_existing = raw_existing_pkg.replace("'", "").replace('"', "")
-            clean_new = new_pkg.replace("'", "").replace('"', "")
-
-            # Logowanie dla pewności (zobaczysz to w konsoli)
-            if clean_existing and clean_new:
-                logging.info(f"🔍 Porównanie paczek: Arkusz='{clean_existing}' vs Mail='{clean_new}'")
-
-            # ✅ ZABEZPIECZENIE: Porównujemy TYLKO czyste numery
+            # Czyścimy do porównania
+            clean_existing = existing_pkg.replace("'", "").strip()
+            clean_new = new_pkg.replace("'", "").strip() if new_pkg else ""
+            
+            # --- ZMIANA LOGIKI KONFLIKTÓW ---
             if clean_existing and clean_new and clean_existing != clean_new:
-                logging.warning(f"⚠️ KONFLIKT PACZEK RZECZYWISTY: Wiersz {row} ma '{clean_existing}', a mail '{clean_new}'.")
-                logging.info("➡️ Tworzę NOWY wiersz dla tej drugiej paczki zamiast nadpisywać.")
-                return self.create_shipment_row(order_data)
+                logging.info(f"🔄 ZMIANA NUMERU PACZKI (Handover): {clean_existing} -> {clean_new}")
                 
-        except Exception as e:
-            logging.error(f"Błąd podczas sprawdzania konfliktu paczek: {e}")
+                # Opcjonalnie: Zapisz stary numer w Info, żeby nie przepadł
+                current_info = existing_values[13]
+                if clean_existing not in current_info:
+                     combined_info = f"{current_info} | Prev: {clean_existing}".strip(" | ")
+                     self.sheets_handler.worksheet.update_cell(row, 14, combined_info)
+                
+                # NADPISZ numer paczki w kolumnie O (15)
+                self.sheets_handler.worksheet.update_cell(row, 15, f"'{clean_new}")
+                
+                # Nie przerywamy! Traktujemy to jako ten sam wiersz.
+            
+            # Jeśli wiersz nie miał numeru paczki, a teraz ma - uzupełnij
+            elif not clean_existing and clean_new:
+                 self.sheets_handler.worksheet.update_cell(row, 15, f"'{clean_new}")
 
-        # Jeśli brak konfliktu (numery są te same lub w arkuszu pusto), aktualizuj standardowo
-        return self.general_update_sheet_data(row, order_data, "shipment_sent")
+            # 2. Wywołaj standardową aktualizację reszty danych (status, info, data)
+            return self.general_update_sheet_data(row, order_data, "shipment_sent")
+
+        except Exception as e:
+            logging.error(f"Błąd update_shipment_sent: {e}")
+            return False
 
     def general_update_sheet_data(self, row, order_data, status_key):
         """Ogólna metoda aktualizacji danych w arkuszu"""

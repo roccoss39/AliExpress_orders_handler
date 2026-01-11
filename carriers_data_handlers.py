@@ -165,68 +165,84 @@ class AliexpressDataHandler(BaseDataHandler):
     
     def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
         """
-        Przetwarza email od AliExpress
-        
-        Ta metoda implementuje logikę z sekcji "1. Potwierdzenie zamówienia AliExpress"
-        z funkcji analyze_email
+        Przetwarza email od AliExpress używając REGEX (bez dzwonienia do OpenAI).
+        Naprawia błąd limitów API i poprawnie wyciąga numer zamówienia.
         """
-        logging.debug(f"Wejscie do fun process AliExpress: {subject}")
-        # Wyciągnij klucz użytkownika z adresu email
-        user_key = recipient.split('@')[0] if recipient and '@' in recipient else "unknown"
+        import re
+        import email.utils
         
-        # Utwórz podstawowy słownik danych
-        data = {
+        logging.debug(f"Wejscie do fun process AliExpress (Regex): {subject}")
+        
+        # 1. Wyciągnij datę z obiektu email (jeśli dostępny)
+        email_date = None
+        if email_message:
+            try:
+                date_tuple = email.utils.parsedate_tz(email_message.get('Date'))
+                if date_tuple:
+                    local_date = email.utils.mktime_tz(date_tuple)
+                    from datetime import datetime
+                    email_date = datetime.fromtimestamp(local_date).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception as e:
+                logging.warning(f"Błąd daty w handlerze Ali: {e}")
+
+        # 2. Wyciągnij klucz użytkownika
+        user_key = recipient.split('@')[0].lower() if recipient and '@' in recipient else "unknown"
+
+        # 3. Rozpoznaj status na podstawie słów kluczowych (lepsze niż sztywne "confirmed")
+        status = "unknown"
+        subject_lower = subject.lower()
+        
+        if "wysłane" in subject_lower or "shipped" in subject_lower:
+            status = "transit"
+        elif "dostarczon" in subject_lower or "delivered" in subject_lower:
+            status = "delivered"
+        elif "odbioru" in subject_lower or "pickup" in subject_lower:
+            status = "pickup"
+        elif "potwierdzone" in subject_lower or "confirmed" in subject_lower or "złożone" in subject_lower:
+            status = "confirmed"
+        elif "zamknięte" in subject_lower or "closed" in subject_lower:
+            status = "closed"
+        else:
+            # Domyślny status dla tego handlera, jeśli nic innego nie pasuje
+            status = "confirmed"
+
+        # 4. Wyciągnij numer zamówienia (Order ID) - ULEPSZONY REGEX
+        order_number = None
+        
+        # Wzorzec 1: Szukaj w temacie (np. "Zamówienie 3066686103006644")
+        # Obsługuje dwukropek, spację, hash, lub nic między słowem a numerem
+        match = re.search(r'(?:Zamówienie|Order|Order ID)[:\s#]+(\d{10,})', subject, re.IGNORECASE)
+        if match:
+            order_number = match.group(1)
+        else:
+            # Wzorzec 2: Szukaj w treści, jeśli nie ma w temacie
+            if body:
+                match_body = re.search(r'(?:Order ID|Order No\.|Numer zamówienia|Zamówienie)[:\s]+(\d{10,})', body, re.IGNORECASE)
+                if match_body:
+                    order_number = match_body.group(1)
+
+        # Logowanie wyniku
+        if order_number:
+            logging.info(f"✅ AliExpress Regex sukces: Status={status}, Order={order_number}")
+        else:
+            logging.warning(f"⚠️ AliExpress Regex: Nie znaleziono numeru zamówienia w temacie: '{subject}'")
+
+        # 5. Zwróć gotowe dane
+        return {
             "email": recipient,
             "email_source": email_source,
-            "status": "confirmed",  # Status dla zamówień AliExpress
-            "order_number": None,
-            "product_name": None,
+            "status": status,
+            "order_number": order_number,
+            "product_name": None, # Regexem trudno wyciągnąć nazwę produktu pewnie, ale to nie jest krytyczne do trackingu
             "delivery_address": None,
             "phone_number": None,
             "customer_name": recipient_name,
             "user_key": user_key,
-            "carrier": "AliExpress"
+            "carrier": "AliExpress",
+            "package_number": None,
+            "email_date": email_date,
+            "info": f"{status} (AliExpress)"
         }
-        
-        # Użyj ChatGPT do ekstrakcji danych
-        try:
-            # Wywołaj metodę z OpenAIHandler aby wyciągnąć dane 
-            openai_data = self.email_handler.openai_handler.general_extract_carrier_notification_data(
-                body, subject, data["status"],recipient
-            )
-            
-            # Wypełnij dane z ekstrakcji
-            if openai_data.get("order_number"):
-                data["order_number"] = openai_data["order_number"]
-                # Dodaj mapowanie użytkownik-zamówienie
-                self.email_handler._save_user_order_mapping(user_key, data["order_number"])
-                
-            if openai_data.get("product_name"):
-                data["product_name"] = openai_data["product_name"]
-                
-            if openai_data.get("delivery_address"):
-                data["delivery_address"] = openai_data["delivery_address"]
-                
-            if openai_data.get("phone_number"):
-                data["phone_number"] = openai_data["phone_number"]
-                
-            if openai_data.get("customer_name"):
-                data["customer_name"] = openai_data["customer_name"]
-                
-            logging.info(f"Wyciągnięte dane z potwierdzenia zamówienia: {openai_data}")
-            
-        except Exception as e:
-            # Obsługa błędu podczas ekstrakcji przez ChatGPT
-            logging.error(f"Błąd podczas przetwarzania potwierdzenia zamówienia przez ChatGPT: {e}")
-            
-            # Awaryjne wyciągnięcie numeru zamówienia za pomocą regex
-            # Regex to wzorzec wyszukiwania tekstu - tutaj szukamy "Zamówienie" i cyfr po nim
-            order_match = re.search(r"Zam[óo]wienie (\d+)", subject)
-            if order_match:
-                data["order_number"] = order_match.group(1)  # group(1) oznacza pierwszy nawias w regex
-                self.email_handler._save_user_order_mapping(user_key, data["order_number"])
-        
-        return data
 
 
 class InPostDataHandler(BaseDataHandler):
@@ -260,32 +276,78 @@ class InPostDataHandler(BaseDataHandler):
     
     def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
         """
-        Przetwarza email od InPost
-        
-        Określa jaki to typ wiadomości InPost i deleguje do odpowiedniej metody
+        Przetwarza email od InPost używając Regex.
+        Poprawiona logika statusów (rozróżnia Utworzenie od Odbioru).
         """
-        # Wyciągnij klucz użytkownika z adresu email
-        user_key = recipient.split('@')[0] if recipient and '@' in recipient else "unknown"
+        import re
+        import email.utils
         
-        # Sprawdź jaki to typ wiadomości InPost
-        if "paczka już na ciebie czeka" in subject.lower():
-            # To powiadomienie o paczce do odbioru
-            return self._process_pickup_ready(subject, body, recipient, email_source, 
-                                            recipient_name, user_key)
+        # 1. Data
+        email_date = None
+        if email_message:
+            try:
+                date_tuple = email.utils.parsedate_tz(email_message.get('Date'))
+                if date_tuple:
+                    local_date = email.utils.mktime_tz(date_tuple)
+                    from datetime import datetime
+                    email_date = datetime.fromtimestamp(local_date).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                pass
+
+        subject_lower = subject.lower()
+        body_lower = body.lower() if body else ""
         
-        elif "paczka została odebrana" in subject.lower() or "paczka odebrana" in subject.lower():
-            # To powiadomienie o odebranej paczce
-            return self._process_picked_up(subject, body, recipient, email_source, 
-                                         recipient_name, user_key)
+        # 2. Precyzyjne wykrywanie statusu
+        status = "unknown"
         
-        elif "paczka została dostarczona" in subject.lower() or "została dostarczona" in subject.lower():
-            # To powiadomienie o dostarczonej paczce
-            return self._process_delivered(subject, body, recipient, email_source, 
-                                         recipient_name, user_key)
+        if "dostarczona" in subject_lower or "odebrana" in subject_lower:
+            status = "delivered"
+        elif "czeka na odbiór" in subject_lower or "w paczkomacie" in subject_lower or "kod odbioru" in body_lower:
+            # Tylko jeśli wyraźnie czeka w paczkomacie
+            status = "pickup"
+        elif "utworzenia paczki" in subject_lower or "przygotowana" in subject_lower or "nadana" in subject_lower:
+            # ✅ POPRAWKA: Utworzenie to dopiero początek (shipment_sent)
+            status = "shipment_sent"
+        elif "kurier odebrał" in subject_lower or "w trasie" in subject_lower or "w drodze" in subject_lower:
+            status = "transit"
+        else:
+            # Domyślnie, jeśli to InPost, ale nie wiemy co (bezpieczniej dać shipment_sent niż pickup)
+            if "utworzenia" in subject_lower:
+                 status = "shipment_sent"
+            elif "odbioru" in subject_lower: # Np. "Gotowa do odbioru"
+                 status = "pickup"
+
+        # 3. Wyciąganie numeru paczki (24 cyfry)
+        package_number = None
+        # Szukamy 24 cyfr (standard InPost)
+        match = re.search(r'(?<!\d)(\d{24})(?!\d)', body)
+        if not match:
+             # Czasem w temacie
+             match = re.search(r'(?<!\d)(\d{24})(?!\d)', subject)
         
-        # Inny typ wiadomości InPost - domyślnie traktuj jak paczka do odbioru
-        return self._process_pickup_ready(subject, body, recipient, email_source, 
-                                        recipient_name, user_key)
+        if match:
+            package_number = match.group(1)
+
+        # 4. Wyciąganie kodu odbioru (tylko dla statusu pickup)
+        pickup_code = None
+        if status == "pickup":
+            # Szukamy 6 cyfr kod odbioru
+            code_match = re.search(r'(?:Kod odbioru|Kod|PIN)[:\s]+(\d{6})', body)
+            if code_match:
+                pickup_code = code_match.group(1)
+
+        return {
+            "carrier": "InPost",
+            "status": status,
+            "order_number": None, # InPost rzadko podaje nr zamówienia z Ali
+            "package_number": package_number,
+            "email": recipient,
+            "email_source": email_source,
+            "user_key": recipient.split('@')[0].lower() if recipient else "unknown",
+            "pickup_code": pickup_code,
+            "info": f"{status} (InPost)",
+            "email_date": email_date
+        }
     
     def _process_pickup_ready(self, subject, body, recipient, email_source, recipient_name, user_key):
         """

@@ -466,48 +466,73 @@ class SheetsHandler:
             return False
 
     def _direct_create_row(self, order_data):
-        """Bezpośrednie tworzenie wiersza (bez użycia klasy Carrier)"""
+        """
+        Bezpośrednie tworzenie wiersza z obsługą WSZYSTKICH kolumn (Fix dla numeru zamówienia).
+        """
         try:
             # 1. Znajdź pierwszy wolny wiersz (sprawdzając kolumnę A - Email)
             emails = self.worksheet.col_values(1)
             # Jeśli kolumna pusta (tylko nagłówek), first_empty = 2
             first_empty_row = len(emails) + 1
             
-            # Zabezpieczenie: jeśli len(emails) == 0, to first_empty = 1 (nadpisze nagłówek!), więc minimum 2
+            # Zabezpieczenie: minimum 2
             if first_empty_row < 2: first_empty_row = 2
 
             logging.info(f"Tworzę nowy wiersz awaryjnie w pozycji {first_empty_row}")
             
-            # 2. Przygotuj dane (lista 15 elementów)
+            # 2. Przygotuj dane (lista 15 elementów - kolumny A-O)
             row_data = [""] * 15
-            row_data[0] = order_data.get('email', '') or "" # A
-            row_data[2] = order_data.get('delivery_address', '') or "" # C
-            row_data[7] = order_data.get('email_date', '') or "" # H
             
-            # Status
+            # Kolumna A: Email
+            row_data[0] = order_data.get('email', '') or ""
+            
+            # Kolumna B: Nazwa produktu (zostawiamy puste lub bierzemy z danych)
+            row_data[1] = order_data.get('product_name', '') or ""
+
+            # Kolumna C: Adres
+            row_data[2] = order_data.get('delivery_address', '') or ""
+            
+            # Kolumna H: Data maila (index 7)
+            row_data[7] = order_data.get('email_date', '') or ""
+            
+            # Kolumna I: Status (index 8)
             status_map = {
                 "shipment_sent": "Przesyłka nadana",
                 "pickup": "Gotowa do odbioru",
                 "delivered": "Dostarczona",
-                "transit": "W transporcie"
+                "transit": "W transporcie",
+                "confirmed": "Potwierdzone",
+                "closed": "Zamknięte"
             }
             status_key = order_data.get('status', 'unknown')
             carrier_name = order_data.get('carrier', 'Unknown')
-            row_data[8] = f"{status_map.get(status_key, status_key)} ({carrier_name})" # I
+            # Ładny format statusu
+            row_data[8] = f"{status_map.get(status_key, status_key)} ({carrier_name})" 
             
-            # Paczka
-            pkg = order_data.get('package_number', '')
-            if pkg: row_data[14] = f"'{pkg}" # O (z apostrofem żeby nie formatowało jako liczby)
+            # ✅ KOLUMNA M (Index 12): Numer zamówienia (TO TUTAJ BYŁ BRAK)
+            order_num = order_data.get('order_number')
+            if order_num:
+                # Dodajemy apostrof, żeby Excel nie zamienił długiego numeru na format naukowy (3.06E+15)
+                row_data[12] = f"'{order_num}" 
             
-            # Info
-            row_data[13] = order_data.get('info', '') or "" # N
+            # Kolumna N (Index 13): Info
+            # Jeśli info jest takie samo jak status, to nie wpisuj, żeby nie dublować
+            info_text = order_data.get('info', '') or ""
+            if info_text == row_data[8]: 
+                row_data[13] = "" # Puste, bo to samo co status
+            else:
+                row_data[13] = info_text
 
-            # 3. Zapisz
-            # Używamy update (nie append_row, bo append czasem dodaje na końcu arkusza 1000+)
+            # Kolumna O (Index 14): Numer paczki
+            pkg = order_data.get('package_number', '')
+            if pkg: 
+                row_data[14] = f"'{pkg}" # Z apostrofem
+
+            # 3. Zapisz jednym strzałem
             range_name = f"A{first_empty_row}:O{first_empty_row}"
             self.worksheet.update(range_name=range_name, values=[row_data])
             
-            logging.info(f"Utworzono awaryjnie wiersz {first_empty_row} z podstawowymi danymi")
+            logging.info(f"Utworzono awaryjnie wiersz {first_empty_row}: Order={order_num}, Paczka={pkg}")
             return True
             
         except Exception as e:

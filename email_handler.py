@@ -635,6 +635,9 @@ class EmailHandler:
                             return None
                 elif force_process:
                      logging.info(f"⚠️ TRYB FORCE: Pomijam sprawdzanie daty dla {email_date}")
+                     user_key = recipient.split('@')[0].lower() if recipient else None
+                     if user_key:
+                         self._update_user_last_email_date(user_key, email_date)
 
                 # 1. Szybkie sprawdzenie statusów specyficznych
                 result = handler.parse_delivery_status(subject, recipient, body, handler.name)

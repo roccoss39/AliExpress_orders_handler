@@ -96,6 +96,9 @@ def main_loop():
     else:
         logging.info("🚀 Uruchamianie w trybie CONFIG: Stała lista z pliku")
 
+    first_run = True
+
+
     while True:
         # ✅ SPRAWDŹ CZY ZAŻĄDANO ZAMKNIĘCIA
         if is_shutdown_requested():
@@ -236,16 +239,24 @@ def main_loop():
                                 logging.warning(f"Nieznany przewoźnik: {carrier_name}")
             
             # ✅ SPRAWDZAJ MAILE TYLKO GDY BYŁY ZMIANY
-            if len(processed_emails) > 0:
+            if len(processed_emails) > 0 or first_run:
                 limiters.wait_for("sheets_read")
-                logging.info("🔍 Sprawdzanie dostępności maili (wykryto nowe emaile)...")
+                
+                if first_run:
+                    logging.info("🚀 PIERWSZE URUCHOMIENIE: Aktualizacja statusów kont i kolorów...")
+                else:
+                    logging.info("🔍 NOWE MAILE: Aktualizacja statusów kont...")
+
                 try:
                     email_availability_manager.check_email_availability()
-                    logging.info("✅ Sprawdzenie dostępności maili zakończone")
+                    logging.info("✅ Statusy kont i kolory zostały odświeżone")
                 except Exception as e:
                     logging.error(f"❌ Błąd podczas sprawdzania dostępności maili: {e}")
+                
+                # ✅ 3. Ważne: Wyłącz flagę po pierwszym wykonaniu
+                first_run = False
             else:
-                logging.debug("⏳ Pomijanie sprawdzania maili (brak nowych emaili)")
+                logging.debug("⏳ Brak nowych maili - pomijam odświeżanie arkusza Accounts")
             
             # ✅ OKRESOWE ZAPISYWANIE STANU I MONITORING
             loop_counter = getattr(main_loop, 'counter', 0)
@@ -895,6 +906,18 @@ def run_reprocess(target_email, limit=None):
                 if not order_data.get("email_date") and email_date:
                     order_data["email_date"] = email_date
                 
+                user_key = order_data.get("user_key")
+                if user_key:
+                    # 1. Mapowanie Zamówienia
+                    if order_data.get("order_number"):
+                        email_handler._save_user_order_mapping(user_key, order_data["order_number"])
+                        logging.info(f"💾 Zapisano mapowanie: {user_key} -> Order {order_data['order_number']}")
+                    
+                    # 2. Mapowanie Paczki
+                    if order_data.get("package_number"):
+                        email_handler._save_user_package_mapping(user_key, order_data["package_number"])
+                        logging.info(f"💾 Zapisano mapowanie: {user_key} -> Paczka {order_data['package_number']}")
+
                 # Zapisz do arkusza używając logiki Carrierów
                 carrier_name = order_data.get("carrier", "InPost")
                 carrier = sheets_handler.carriers.get(carrier_name)
