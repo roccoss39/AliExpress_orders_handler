@@ -583,8 +583,8 @@ class EmailHandler:
         return None
 
 
-    def analyze_email(self, subject, body, recipient, email_source, recipient_name=None, email_message=None, email_date=None):
-        """Analiza treści e-maila z uwzględnieniem daty"""
+    def analyze_email(self, subject, body, recipient, email_source, recipient_name=None, email_message=None, email_date=None, force_process=False):
+        """Analiza treści e-maila z uwzględnieniem daty i przełącznika AI/Regex"""
         
         # Podstawowe dane dla każdego maila
         data = {
@@ -599,47 +599,52 @@ class EmailHandler:
             "pickup_deadline": None,
             "pickup_code": None,
             "customer_name": recipient_name,
-            "user_key": recipient.split('@')[0] if recipient and '@' in recipient else "unknown",
+            "user_key": recipient.split('@')[0].lower() if recipient and '@' in recipient else "unknown",
             "available_hours": None,
             "item_link": None,
-            "carrier": None,                # Przewoźnik (DPD, InPost, DHL, AliExpress)
-            "package_number": None,         # Numer paczki przewoźnika
-            "shipping_date": None,          # Data nadania przesyłki
-            "delivery_date": None,          # Data doręczenia
-            "expected_delivery_date": None, # Planowana data doręczenia
-            "qr_code": None,                # Link do kodu QR
+            "carrier": None,
+            "package_number": None,
+            "shipping_date": None,
+            "delivery_date": None,
+            "expected_delivery_date": None,
+            "qr_code": None,
             "info": None,   
             "email_date": email_date                       
         }
         
-        # Sprawdź wszystkie handlery czy któryś może obsłużyć ten email
+        import config
+        
+        # Sprawdź wszystkie handlery
         for handler in self.data_handlers:
             if handler.can_handle(subject, body):
                 logging.info(f"Wykryto email obsługiwany przez {handler.name}")
                 
-                if email_date:
-                    user_key = recipient.split('@')[0] if recipient and '@' in recipient else None
+                # --- LOGIKA SPRAWDZANIA DATY Z OBSŁUGĄ FORCE_PROCESS ---
+                if email_date and not force_process:  # <--- Sprawdzamy tylko jeśli NIE wymuszamy
+                    user_key = recipient.split('@')[0].lower() if recipient and '@' in recipient else None
                     
                     if user_key:
                         existing_email_date = self._get_user_last_email_date(user_key)
                         logging.info(f"Sprawdzanie dat dla użytkownika {user_key}: nowy={email_date}, istniejący={existing_email_date}")
                         
-                        # ZAWSZE AKTUALIZUJ JEŚLI EMAIL JEST NOWSZY LUB BRAK DATY
                         if not existing_email_date or self.should_update_based_on_date(email_date, existing_email_date):
                             logging.info(f"✅ Przetwarzam najnowszy email dla {user_key}")
                             self._update_user_last_email_date(user_key, email_date)
                         else:
                             logging.info(f"⏭️ Pomijam starszy email dla {user_key}")
                             return None
-                        
+                elif force_process:
+                     logging.info(f"⚠️ TRYB FORCE: Pomijam sprawdzanie daty dla {email_date}")
+
+                # 1. Szybkie sprawdzenie statusów specyficznych
                 result = handler.parse_delivery_status(subject, recipient, body, handler.name)
                 if result:
-                    return result
+                    return {**data, **result}
                 
                 if handler.name == "AliExpress":
                     result = handler.parse_transit_status(subject, recipient, handler.name)
                     if result:
-                        return result
+                        return {**data, **result}
                 
                 if hasattr(handler, 'is_closed_order'):
                     is_closed = handler.is_closed_order(subject)
@@ -647,34 +652,47 @@ class EmailHandler:
                         logging.info(f"Email zakwalifikowany jako zamknięte zamówienie przez {handler.name}")
                         data["status"] = "closed"
                         data["carrier"] = handler.name
-                        return data
+                        return {**data, **data} # Zwracamy data scalone
 
                 logging.info(f"EMAIL NIE ZAKWALIFIKOWANY JAKO ZAMKNIĘTE ZAMÓWIENIE PRZEZ {handler.name}")        
-                # SPRAWDŹ DATĘ PRZED KONTYNUOWANIEM
 
-                # Kontynuuj z AI i standardowym przetwarzaniem
-                openai_data = self.openai_handler.general_extract_carrier_notification_data(
-                    body, subject, handler.name, recipient
-                )
+                # 2. Decyzja: AI czy Regex?
+                openai_data = None
+                use_ai = getattr(config, 'USE_OPENAI_API', False) 
 
-                # Dodaj sprawdzenie czy AI zwróciło dane
+                if use_ai:
+                    logging.info(f"🤖 Uruchamiam analizę AI dla {handler.name}...")
+                    try:
+                        openai_data = self.openai_handler.general_extract_carrier_notification_data(
+                            body, subject, handler.name, recipient
+                        )
+                    except Exception as e:
+                        logging.error(f"❌ Błąd AI: {e}. Przełączam na Regex.")
+                        openai_data = None
+                else:
+                    logging.info(f"⚡ Tryb Regex (AI wyłączone w config): Używam wzorców dla {handler.name}")
+
                 if openai_data:
-                    # Ustaw przewoźnika na podstawie handlera, jeśli AI go nie zwróciło
                     if not openai_data.get("carrier"):
                         openai_data["carrier"] = handler.name
-                    return openai_data
+                    return {**data, **openai_data}
 
-                # Jesli AI nie zwróciło danych, użyj domyślnej metody przetwarzania
-                processed_data = handler.process(subject, body, recipient, email_source, recipient_name, email_message=email_message)
+                # 3. Fallback / Regex
+                logging.info(f"🔍 Uruchamiam handler.process (Regex) dla {handler.name}")
+                # Przekazujemy email_message do handlera (jeśli handler to obsługuje)
+                try:
+                    processed_data = handler.process(subject, body, recipient, email_source, recipient_name, email_message)
+                except TypeError:
+                    # Fallback dla starszych handlerów bez argumentu email_message
+                    processed_data = handler.process(subject, body, recipient, email_source, recipient_name)
+                
                 if processed_data:
                     if not processed_data.get("carrier"):
                         processed_data["carrier"] = handler.name
-                        logging.info(f"Ustawiono carrier na {handler.name} na podstawie nazwy handlera")
-
-                    # Połącz domyślne dane z danymi przetworzonymi przez handler
+                    
+                    logging.info(f"✅ Dane wyciągnięte Regexpem: Status={processed_data.get('status')}, Paczka={processed_data.get('package_number')}")
                     return {**data, **processed_data}
     
-        # Żaden handler nie obsłużył tego emaila
         logging.info(f"Mail nie został zakwalifikowany do żadnej kategorii: {subject}")
         return None
 
@@ -899,3 +917,81 @@ class EmailHandler:
         except Exception as e:
             logging.warning(f"⚠️ Błąd dekodowania tematu: {e}")
             return subject
+        
+    def fetch_specific_account_history(self, target_email, days_back=30):
+        """
+        Pobiera historię maili dla konkretnego konta (ignorując status przeczytania).
+        Zwraca maile posortowane OD NAJSTARSZEGO.
+        """
+        import config
+        from datetime import datetime, timedelta
+        import email
+        
+        target_email = target_email.strip().lower()
+        all_emails = []
+        
+        # 1. Znajdź konfigurację dla podanego maila w configu
+        found_config = None
+        for cfg in config.ALL_EMAIL_CONFIGS:
+            if cfg['email'].strip().lower() == target_email:
+                found_config = cfg
+                break
+        
+        if not found_config:
+            logging.error(f"❌ Nie znaleziono konfiguracji dla {target_email} w config.py")
+            return []
+
+        # 2. Oblicz datę wstecz
+        cutoff_date = datetime.now() - timedelta(days=days_back)
+        date_string = cutoff_date.strftime('%d-%b-%Y')
+        
+        source = found_config.get('source', 'unknown')
+        logging.info(f"🔄 REPROCESS: Łączenie z {target_email} ({source})...")
+        
+        client = self.connect_to_email_account(found_config)
+        if not client:
+            return []
+
+        try:
+            client.select("INBOX")
+            
+            # ✅ SZUKAJ WSZYSTKICH MAILI OD DATY (bez UNSEEN)
+            search_criteria = f'(SINCE "{date_string}")'
+            logging.info(f"📅 Kryteria reprocess: {search_criteria}")
+            
+            status, messages = client.search(None, search_criteria)
+            
+            if status == "OK" and messages[0]:
+                msg_ids = messages[0].split()
+                logging.info(f"📧 Znaleziono łącznie {len(msg_ids)} wiadomości z ostatnich {days_back} dni.")
+                
+                # ✅ WAŻNE: Sortuj od NAJSTARSZYCH (rosnąco), aby odtwarzać historię chronologicznie
+                msg_ids.sort(key=lambda x: int(x.decode()), reverse=False)
+                
+                for num in msg_ids:
+                    # Pobierz nagłówki i treść
+                    res, msg_data = client.fetch(num, "(RFC822)")
+                    if res == "OK":
+                        raw_email = msg_data[0][1]
+                        try:
+                            msg = email.message_from_bytes(raw_email)
+                        except:
+                            try:
+                                msg = email.message_from_string(raw_email.decode('utf-8', errors='ignore'))
+                            except:
+                                continue
+                        
+                        all_emails.append((source, msg))
+            else:
+                logging.warning("📭 Nie znaleziono żadnych wiadomości w zadanym okresie.")
+
+        except Exception as e:
+            logging.error(f"❌ Błąd podczas pobierania historii: {e}")
+        finally:
+            try:
+                client.close()
+                client.logout()
+            except:
+                pass
+                
+        return all_emails

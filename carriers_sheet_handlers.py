@@ -20,52 +20,79 @@ class BaseCarrier:
             "unknown": {"red": 1.0, "green": 1.0, "blue": 1.0}
         }
 
-    def get_status_priority(self, status):
-        """Zwraca priorytet statusu (im wyższy, tym ważniejszy)"""
-        status = status.lower()
+    def get_status_priority(self, status_text):
+        """
+        Zwraca priorytet statusu (im wyższa liczba, tym ważniejszy status).
+        """
+        if not status_text:
+            return 0
+            
+        status = status_text.lower()
         
-        # ✅ POPRAWKA: unknown ma najniższy priorytet!
+        # 0. Nieznany / Pusty
         if "unknown" in status or "nieznan" in status:
             return 0
             
-        if "confirmed" in status or "zatwierdzon" in status:
+        # 1. Zatwierdzone (Jeszcze nie wysłane)
+        if "confirmed" in status or "zatwierdzon" in status or "potwierdzon" in status:
             return 1
+            
+        # 2. Wysłane / W drodze (ZRÓWNUJEMY TE STATUSY!)
+        # Dzięki temu "Nadano" od Poczty Polskiej nadpisze "W transporcie" od AliExpress,
+        # jeśli mail od Poczty przyszedł później.
         if "shipment_sent" in status or "nadan" in status:
             return 2
-        if "transit" in status or "transporcie" in status:
-            return 3
-        if "pickup" in status or "odbioru" in status:
-            return 4
-        if "delivered" in status or "dostarczon" in status or "odebran" in status:
-            return 5
-        if "canceled" in status or "anulowan" in status or "zwrot" in status:
-            return 6
+        if "transit" in status or "transporcie" in status or "drodze" in status:
+            return 2  # <--- ZMIANA z 3 na 2
             
-        return 1 # Domyślny niski priorytet dla innych statusów
+        # 3. Gotowa do odbioru (To musi być wyżej niż transport)
+        if "pickup" in status or "odbioru" in status or "awizo" in status or "placówce" in status:
+            return 3
+            
+        # 4. Doręczona / Zamknięta (Ostateczny status)
+        if "delivered" in status or "dostarczon" in status or "odebran" in status:
+            return 4
+        if "closed" in status or "zamknięte" in status:
+            return 4
+            
+        # 5. Zwroty / Anulowane
+        if "canceled" in status or "anulowan" in status or "zwrot" in status:
+            return 5
+            
+        return 0 # Domyślny niski priorytet dla innych statusów
 
     def update_shipment_sent(self, row, order_data):
         """
         Specjalna obsługa statusu shipment_sent z zabezpieczeniem przed nadpisaniem innej paczki.
         """
-        # Pobierz istniejące dane z wiersza
         try:
+            # 1. Pobierz istniejące dane z wiersza
             existing_values = self.sheets_handler.worksheet.row_values(row)
             # Uzupełnij do 15 kolumn
             while len(existing_values) < 15: existing_values.append("")
             
-            existing_pkg = existing_values[14].strip() # Kolumna O
+            # Pobierz surową wartość z arkusza
+            raw_existing_pkg = existing_values[14].strip() # Kolumna O
             new_pkg = order_data.get("package_number", "").strip()
             
-            # ✅ ZABEZPIECZENIE: Jeśli wiersz ma już numer paczki, a my mamy inny -> NOWY WIERSZ
-            if existing_pkg and new_pkg and existing_pkg != new_pkg:
-                logging.warning(f"⚠️ KONFLIKT PACZEK: W wierszu {row} jest '{existing_pkg}', a mail ma '{new_pkg}'.")
+            # ✅ CZYSZCZENIE PRZED PORÓWNANIEM (Usuń apostrofy ' i ")
+            clean_existing = raw_existing_pkg.replace("'", "").replace('"', "")
+            clean_new = new_pkg.replace("'", "").replace('"', "")
+
+            # Logowanie dla pewności (zobaczysz to w konsoli)
+            if clean_existing and clean_new:
+                logging.info(f"🔍 Porównanie paczek: Arkusz='{clean_existing}' vs Mail='{clean_new}'")
+
+            # ✅ ZABEZPIECZENIE: Porównujemy TYLKO czyste numery
+            if clean_existing and clean_new and clean_existing != clean_new:
+                logging.warning(f"⚠️ KONFLIKT PACZEK RZECZYWISTY: Wiersz {row} ma '{clean_existing}', a mail '{clean_new}'.")
                 logging.info("➡️ Tworzę NOWY wiersz dla tej drugiej paczki zamiast nadpisywać.")
                 return self.create_shipment_row(order_data)
                 
         except Exception as e:
             logging.error(f"Błąd podczas sprawdzania konfliktu paczek: {e}")
 
-        # Jeśli brak konfliktu, aktualizuj standardowo
+        # Jeśli brak konfliktu (numery są te same lub w arkuszu pusto), aktualizuj standardowo
         return self.general_update_sheet_data(row, order_data, "shipment_sent")
 
     def general_update_sheet_data(self, row, order_data, status_key):

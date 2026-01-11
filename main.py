@@ -828,15 +828,112 @@ def show_diagnostic_menu():
         input("\n⏎ Naciśnij Enter aby kontynuować...")
 
 # Na końcu main.py
+def run_reprocess(target_email, limit=None):
+    logging.info(f"🛠️ URUCHAMIAM TRYB REPROCESS DLA: {target_email}")
+    if limit:
+        logging.info(f"🔢 Cel: Przetworzyć {limit} zamówień (zaczynając od najstarszych)")
+    
+    email_handler = EmailHandler()
+    sheets_handler = SheetsHandler()
+    
+    if not sheets_handler.connect():
+        logging.error("❌ Błąd połączenia z arkuszem.")
+        return
+
+    # 1. Pobierz WSZYSTKIE maile z okresu (bez limitu tutaj)
+    emails = email_handler.fetch_specific_account_history(target_email, days_back=30)
+    
+    if not emails:
+        logging.warning("Brak maili do przetworzenia.")
+        return
+
+    logging.info(f"Pobrano {len(emails)} maili z serwera. Rozpoczynam filtrowanie i analizę...")
+    processed_count = 0 # Licznik faktycznie przetworzonych (zaakceptowanych) maili
+    
+    # 2. Przetwarzaj maile
+    for source, msg in emails:
+        # ✅ SPRAWDZENIE LIMITU PRZETWORZONYCH ZAMÓWIEŃ
+        if limit and processed_count >= limit:
+            logging.info(f"🛑 Osiągnięto limit {limit} przetworzonych zamówień. Kończę pracę.")
+            break
+
+        try:
+            # Wyciągnij datę i temat
+            email_date = email_handler.extract_email_date(msg)
+            raw_subject = msg.get("Subject", "")
+            subject = email_handler.decode_email_subject(raw_subject)
+            
+            # FILTR WSTĘPNY (Decyduje, czy mail to zamówienie)
+            keywords = ["paczka", "zamówienie", "order", "delivery", "dostawa", "odbierz", "nadana", "status", "inpost", "dhl", "dpd", "gls", "poczta"]
+            if not any(k in subject.lower() for k in keywords):
+                # To jest spam/nieistotny mail - pomijamy i NIE wliczamy do limitu
+                continue
+
+            body = email_handler.get_email_body(msg)
+            
+            # Ustal odbiorcę
+            to_header = msg.get("To", "")
+            recipient = target_email 
+            if to_header:
+                import re
+                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', to_header)
+                if email_match:
+                    recipient = email_match.group(0)
+            
+            logging.info(f"🔍 Reprocess (Znaleziono {processed_count}/{limit if limit else '∞'}): {email_date} | {subject[:50]}...")
+            
+            # 3. Analiza z FORCE_PROCESS=True (ignoruje daty w mappings)
+            order_data = email_handler.analyze_email(
+                subject, body, recipient, source, 
+                recipient_name=recipient, email_message=msg, email_date=email_date,
+                force_process=True 
+            )
+            
+            # Jeśli analyze_email zwróciło dane (czyli mail był o paczce)
+            if order_data:
+                # Upewnij się, że data jest w danych
+                if not order_data.get("email_date") and email_date:
+                    order_data["email_date"] = email_date
+                
+                # Zapisz do arkusza używając logiki Carrierów
+                carrier_name = order_data.get("carrier", "InPost")
+                carrier = sheets_handler.carriers.get(carrier_name)
+                
+                if carrier:
+                    carrier.process_notification(order_data)
+                    logging.info(f"✅ Przetworzono reprocess: {subject[:30]}")
+                    # ✅ ZWIĘKSZAMY LICZNIK TYLKO GDY SUKCES (TO BYŁO ZAMÓWIENIE)
+                    processed_count += 1 
+                else:
+                    # Fallback
+                    sheets_handler._direct_create_row(order_data)
+                    logging.info(f"✅ Przetworzono reprocess (direct): {subject[:30]}")
+                    processed_count += 1
+                
+        except Exception as e:
+            logging.error(f"Błąd przy reprocess maila: {e}")
+            
+    logging.info(f"🏁 Zakończono reprocess. Przetworzono skutecznie: {processed_count} zamówień.")
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="AliExpress Order Tracker")
+    parser.add_argument("--menu", action="store_true", help="Uruchom menu diagnostyczne")
+    parser.add_argument("--reprocess-email", type=str, help="Wymuś ponowne przetworzenie maili dla podanego adresu")
+    parser.add_argument("--limit", type=int, help="Maksymalna liczba maili do przetworzenia (dla trybu reprocess)")
 
-    if len(sys.argv) > 1 and sys.argv[1] == "--menu":
-        # python3 main.py --menu
+    args = parser.parse_args()
+
+    if args.menu:
         # Uruchom menu diagnostyczne
         show_diagnostic_menu()
+    
+    elif args.reprocess_email:
+        # ✅ URUCHOM TRYB NAPRAWCZY Z PRZEKAZANIEM LIMITU
+        run_reprocess(args.reprocess_email, limit=args.limit)
+        
     else:
-        # Uruchom główną pętlę ZAWSZE, gdy nie ma argumentu "--menu"
-        # Ignoruj ustawienie TEST_MODE
+        # Uruchom główną pętlę (standardowo)
         print("Uruchamianie głównej pętli. Naciśnij Ctrl+C aby zatrzymać.")
         main_loop()

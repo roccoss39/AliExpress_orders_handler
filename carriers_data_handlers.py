@@ -28,7 +28,7 @@ class BaseDataHandler:
         """
         return False
     
-    def process(self, subject, body, recipient, email_source, recipient_name=None):
+    def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
         """
         Przetwarza email i zwraca wyodrębnione dane
         
@@ -163,7 +163,7 @@ class AliexpressDataHandler(BaseDataHandler):
                 return True
         return False
     
-    def process(self, subject, body, recipient, email_source, recipient_name=None):
+    def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
         """
         Przetwarza email od AliExpress
         
@@ -258,7 +258,7 @@ class InPostDataHandler(BaseDataHandler):
                 return True
         return False
     
-    def process(self, subject, body, recipient, email_source, recipient_name=None):
+    def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
         """
         Przetwarza email od InPost
         
@@ -462,7 +462,7 @@ class DHLDataHandler(BaseDataHandler):
                 
         return False
     
-    def process(self, subject, body, recipient, email_source, recipient_name=None):
+    def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
         """
         Przetwarza email od DHL
         
@@ -760,7 +760,7 @@ class DPDDataHandler(BaseDataHandler):
         
         return False
     
-    def process(self, subject, body, recipient, email_source, recipient_name=None):
+    def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
         """
         Przetwarza email od DPD
         
@@ -1022,7 +1022,7 @@ class GLSDataHandler(BaseDataHandler):
         
         return False
     
-    def process(self, subject, body, recipient, email_source, recipient_name=None):
+    def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
         """
         Przetwarza email od GLS
         
@@ -1238,7 +1238,6 @@ class PocztaPolskaDataHandler(BaseDataHandler):
             "e-info",
             "informacja@poczta-polska.pl",
             "przesyłka o numerze px",
-            "wydana do doręczenia"
         ]
         
         subject_lower = subject.lower()
@@ -1250,8 +1249,11 @@ class PocztaPolskaDataHandler(BaseDataHandler):
                 return True
         return False
     
-    def process(self, subject, body, recipient, email_source, recipient_name=None):
-        """Przetwarza email od Poczty Polskiej"""
+    def process(self, subject, body, recipient, email_source, recipient_name=None, email_message=None):
+        """
+        Przetwarza email od Poczty Polskiej (Tryb Czysty Regex)
+        """
+        import re
         
         # Dane domyślne
         data = {
@@ -1262,75 +1264,64 @@ class PocztaPolskaDataHandler(BaseDataHandler):
             "user_key": recipient.split('@')[0] if recipient else "unknown",
             "carrier": "PocztaPolska",
             "package_number": None,
-            "pickup_code": None,      # PIN
-            "courier_phone": None,    # Telefon kuriera
+            "pickup_code": None,      
+            "courier_phone": None,
             "info": None
         }
 
-        # 1. Wstępne określenie statusu
-        body_lower = body.lower()
-        if "dziękujemy za odbiór" in body_lower or "doręczona" in body_lower:
-            data["status"] = "delivered"
-        elif "wydana do doręczenia" in body_lower or "kod pin" in body_lower:
+        # 1. Wyciąganie Numeru Przesyłki (Najważniejsze!)
+        # Obsługuje formaty: PX123456789PL oraz (00)123456...
+        # Radzi sobie z HTML np. "numerze <strong>PX..." lub linkami "numer=PX..."
+        pkg_match = re.search(r'(?:numerze|numer=)\s*(?:<strong>|<b>|&nbsp;)?\s*([A-Z]{2}\d{9,}[A-Z]{0,2}|00\d{18})', body)
+        
+        if pkg_match:
+            data["package_number"] = pkg_match.group(1)
+        else:
+            # Fallback: szukaj po prostu formatu PX na początku słowa
+            fallback_match = re.search(r'\b(PX\d{9,}[A-Z]{0,2})\b', body)
+            if fallback_match:
+                data["package_number"] = fallback_match.group(1)
+
+        # 2. Wyciąganie Kodu PIN (Odbiór w punkcie/skrytce)
+        pin_match = re.search(r'(?:Kod|PIN)[:\s]+(\d{6})', body, re.IGNORECASE)
+        if pin_match:
+            data["pickup_code"] = pin_match.group(1)
             data["status"] = "pickup"
-        elif "awizo" in body_lower or "w placówce" in body_lower:
+
+        # 3. Telefon kuriera
+        phone_match = re.search(r'Telefon do kuriera:?\s*(\d{3}[\s-]?\d{3}[\s-]?\d{3})', body)
+        if phone_match:
+            raw_phone = phone_match.group(1).replace(" ", "").replace("-", "")
+            data["courier_phone"] = raw_phone
+
+        # 4. Określanie statusu na podstawie treści
+        body_lower = body.lower()
+        subject_lower = subject.lower()
+
+        # Priorytetyzacja statusów
+        if "dziękujemy za odbiór" in body_lower or "doręczona" in body_lower or "odebrana" in body_lower:
+            data["status"] = "delivered"
+        elif "wydana do doręczenia" in body_lower:
+            data["status"] = "pickup" # Kurier jedzie
+            data["info"] = "Wydana do doręczenia"
+        elif "awizo" in body_lower or "w placówce" in body_lower or "gotowa do odbioru" in body_lower:
             data["status"] = "pickup"
         elif "została do ciebie nadana" in body_lower or "nadana" in body_lower:
             data["status"] = "shipment_sent"
-
-        # 2. Użycie OpenAI
-        try:
-            openai_data = self.email_handler.openai_handler.general_extract_carrier_notification_data(
-                body, subject, "PocztaPolska", recipient
-            )
-            
-            # Akceptuj dane z AI tylko jeśli mają sens
-            if openai_data and openai_data.get("status") != "unknown":
-                for key, value in openai_data.items():
-                    if value and key in data:
-                        data[key] = value
-                
-                if openai_data.get("courier_phone"):
-                    data["courier_phone"] = openai_data["courier_phone"]
-                if openai_data.get("info"):
-                    data["info"] = openai_data["info"]
-            else:
-                logging.warning("⚠️ AI zwróciło 'unknown' dla Poczty Polskiej - przechodzę do Regex")
-
-        except Exception as e:
-            logging.error(f"Błąd AI dla Poczty Polskiej: {e}")
-
-        # 3. Fallback (Regex)
-        import re
+            # Sprawdź czy to Cainiao
+            if "cainiao" in body_lower:
+                data["info"] = "Nadano (Cainiao)"
         
-        # Numer przesyłki
-        if not data.get("package_number"):
-            track_match = re.search(r'(PX\d{10,})', body)
-            if not track_match:
-                track_match = re.search(r'\(00\)(\d{18})', body)
-            if track_match:
-                data["package_number"] = track_match.group(1)
-
-        # Kod PIN
-        if not data.get("pickup_code"):
-            pin_match = re.search(r'Kod PIN:\s*(\d{6})', body)
-            if pin_match:
-                data["pickup_code"] = pin_match.group(1)
-                data["status"] = "pickup"
-
-        # Telefon kuriera
-        if not data.get("courier_phone"):
-            phone_match = re.search(r'Telefon do kuriera:\s*(\d{9}|\d{3}\s\d{3}\s\d{3})', body)
-            if phone_match:
-                data["courier_phone"] = phone_match.group(1).replace(" ", "")
-
-        # Info fallback
-        if not data.get("info") and (data.get("courier_phone") or "CAINIAO" in body):
-            info_parts = []
-            if data.get("courier_phone"):
-                info_parts.append(f"Kurier tel: {data['courier_phone']}")
-            if "CAINIAO" in body:
-                info_parts.append("Od: CAINIAO")
+        # 5. Budowanie pola Info
+        info_parts = []
+        if data.get("info"):
+            info_parts.append(data["info"])
+        if data.get("courier_phone"):
+            info_parts.append(f"Kurier: {data['courier_phone']}")
+        if "cainiao" in body_lower and "cainiao" not in str(data.get("info", "")).lower():
+            info_parts.append("AliExpress/Cainiao")
+            
+        if info_parts:
             data["info"] = " | ".join(info_parts)
 
         return data

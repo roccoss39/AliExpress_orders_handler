@@ -466,35 +466,52 @@ class SheetsHandler:
             return False
 
     def _direct_create_row(self, order_data):
-        """Bezpośrednie utworzenie wiersza (awaryjne)"""
-        logging.debug(f"Wejście do funkcji: _direct_create_row(order_data={order_data})")
+        """Bezpośrednie tworzenie wiersza (bez użycia klasy Carrier)"""
         try:
-            logging.info(f"Rozpoczynam AWARYJNE tworzenie wiersza z danymi: {order_data}")
+            # 1. Znajdź pierwszy wolny wiersz (sprawdzając kolumnę A - Email)
+            emails = self.worksheet.col_values(1)
+            # Jeśli kolumna pusta (tylko nagłówek), first_empty = 2
+            first_empty_row = len(emails) + 1
             
-            # Upewnij się, że połączenie jest aktywne
-            if not self.connected:
-                logging.warning("Brak połączenia podczas awaryjnego tworzenia wiersza - próbuję połączyć")
-                if not self.connect():
-                    logging.error("KRYTYCZNY: Nie udało się połączyć z arkuszem Google podczas awaryjnego tworzenia wiersza")
-                    return False
+            # Zabezpieczenie: jeśli len(emails) == 0, to first_empty = 1 (nadpisze nagłówek!), więc minimum 2
+            if first_empty_row < 2: first_empty_row = 2
+
+            logging.info(f"Tworzę nowy wiersz awaryjnie w pozycji {first_empty_row}")
             
-            # Uproszczona metoda aktualizacji - tylko kluczowe kolumny
-            try:
-                values = self.worksheet.get_all_values()
-                next_row = len(values) + 1
-                logging.info(f"Tworzę nowy wiersz awaryjnie w pozycji {next_row}")
-                
-                self.worksheet.update_cell(next_row, 1, order_data.get("customer_name", ""))  # A: email
-                self.worksheet.update_cell(next_row, 3, order_data.get("pickup_location", ""))  # C: receive place
-                self.worksheet.update_cell(next_row, 5, order_data.get("pickup_code", ""))  # E: receive code
-                
-                logging.info(f"Utworzono awaryjnie wiersz {next_row} z podstawowymi danymi")
-                return True
-            except Exception as direct_error:
-                logging.error(f"KRYTYCZNY BŁD podczas awaryjnego tworzenia wiersza: {direct_error}")
-                return False
+            # 2. Przygotuj dane (lista 15 elementów)
+            row_data = [""] * 15
+            row_data[0] = order_data.get('email', '') or "" # A
+            row_data[2] = order_data.get('delivery_address', '') or "" # C
+            row_data[7] = order_data.get('email_date', '') or "" # H
+            
+            # Status
+            status_map = {
+                "shipment_sent": "Przesyłka nadana",
+                "pickup": "Gotowa do odbioru",
+                "delivered": "Dostarczona",
+                "transit": "W transporcie"
+            }
+            status_key = order_data.get('status', 'unknown')
+            carrier_name = order_data.get('carrier', 'Unknown')
+            row_data[8] = f"{status_map.get(status_key, status_key)} ({carrier_name})" # I
+            
+            # Paczka
+            pkg = order_data.get('package_number', '')
+            if pkg: row_data[14] = f"'{pkg}" # O (z apostrofem żeby nie formatowało jako liczby)
+            
+            # Info
+            row_data[13] = order_data.get('info', '') or "" # N
+
+            # 3. Zapisz
+            # Używamy update (nie append_row, bo append czasem dodaje na końcu arkusza 1000+)
+            range_name = f"A{first_empty_row}:O{first_empty_row}"
+            self.worksheet.update(range_name=range_name, values=[row_data])
+            
+            logging.info(f"Utworzono awaryjnie wiersz {first_empty_row} z podstawowymi danymi")
+            return True
+            
         except Exception as e:
-            logging.error(f"Całkowity błąd awaryjnego tworzenia wiersza: {e}")
+            logging.error(f"Błąd _direct_create_row: {e}")
             return False
 
     def load_user_mappings_from_sheets(self):
