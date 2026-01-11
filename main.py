@@ -85,9 +85,9 @@ def main_loop():
     # ✅ URUCHOM HEALTH CHECK SERVER
     try:
         from health_check import start_health_server
-        health_thread = threading.Thread(target=start_health_server, args=(8080,), daemon=True)
+        health_thread = threading.Thread(target=start_health_server, args=(8081,), daemon=True)
         health_thread.start()
-        logging.info('🏥 Uruchomiono health check server na porcie 8080')
+        logging.info('🏥 Uruchomiono health check server na porcie 8081')
     except Exception as e:
         logging.warning(f'⚠️ Nie udało się uruchomić health check: {e}')
         

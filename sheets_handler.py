@@ -3,6 +3,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import config
 import logging
 import re
+import time
 from carriers_sheet_handlers import InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier 
 class SheetsHandler:
     _instance = None
