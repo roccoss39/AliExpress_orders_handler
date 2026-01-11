@@ -4,781 +4,189 @@ import re
 from config import COLORS
 
 class BaseCarrier:
-    """Bazowa klasa dla wszystkich przewoźników"""
+    """Klasa bazowa dla obsługi przewoźników w arkuszu"""
     
     def __init__(self, sheets_handler):
         self.sheets_handler = sheets_handler
         self.name = "Unknown"
-       # DOMYŚLNE KOLORY - SZARE ODCIENIE
+        # Domyślne kolory (mogą być nadpisane w klasach potomnych)
         self.colors = {
-            "transit": {"red": 0.9, "green": 0.9, "blue": 0.9},      # Jasny szary
-            "shipment_sent": {"red": 0.9, "green": 0.9, "blue": 0.9}, # Jasny szary
-            "pickup": {"red": 0.7, "green": 0.7, "blue": 0.7}, # Ciemny szary
-            "delivered": {"red": 0.5, "green": 0.9, "blue": 0.8} ,    # Turkusowy (dostarczenie)
-            "closed": {"red": 1.0, "green": 0.2, "blue": 0.2}  # CZERWONY
+            "shipment_sent": {"red": 0.9, "green": 0.9, "blue": 0.9},
+            "pickup": {"red": 1.0, "green": 1.0, "blue": 0.8},
+            "delivered": {"red": 0.8, "green": 1.0, "blue": 0.8},
+            "transit": {"red": 0.9, "green": 0.9, "blue": 1.0},
+            "returned": {"red": 1.0, "green": 0.8, "blue": 0.8},
+            "canceled": {"red": 1.0, "green": 0.8, "blue": 0.8},
+            "unknown": {"red": 1.0, "green": 1.0, "blue": 1.0}
         }
-    
-    def process_notification(self, order_data):
-        """Przetwarzanie powiadomień od przewoźnika i aktualizacja statusu"""
 
-        if not order_data or not order_data.get("status"):
-            return False
-   
-        status = order_data.get("status")
-        logging.info(f"Przetwarzanie powiadomienia {self.name} o statusie: {status}")
-        # Bezpośrednie przekazanie danych do uniwersalnej funkcji aktualizującej
-        return self.general_update_sheet_data(order_data)
-    
-#     -        status = order_data.get("status")
-# -        logging.info(f"Przetwarzanie powiadomienia {self.name} o statusie: {status}")
-# -        
-# -        # Pobierz package_number 
-# -        package_number = order_data.get("package_number")
-# -        
-# -        # Strategia wyszukiwania wiersza:
-# -        # 1. Najpierw po numerze przewoźnika
-# -        row = self._find_row_by_carrier_package(package_number) if package_number else None
-# -        
-# -        # 2. Następnie po numerze AliExpress jeśli dostępny
-# -        if not row and package_number:
-# -            row = self._find_row_by_tracking(package_number)
-# -            
-# -        # 3. Jeśli nie znaleziono, próbujemy po adresie email
-# -        if not row and order_data.get("email"):
-# -            logging.info(f"Nie znaleziono wiersza po numerze przesyłki, próbuję po email: {order_data.get('email')}")
-# -            row = self._find_row_by_email(order_data.get("email"))
-# -        
-# -        # 4. Ostatnia próba po polu customer_name
-# -        if not row and order_data.get("customer_name"):
-# -            logging.info(f"Próbuję wyszukać po customer_name: {order_data.get('customer_name')}")
-# -            row = self._find_row_by_email(order_data.get("customer_name"))
-# -        
-# -        # Jeśli znaleziono wiersz, zapisz numer paczki przewoźnika w kolumnie O
-# -        if row and package_number:
-# -            try:
-# -                self.sheets_handler.worksheet.update_cell(row, 15, package_number)  # Kolumna O = 15
-# -                logging.info(f"Zapisano numer paczki przewoźnika ({package_number}) w wierszu {row}")
-# -            except Exception as e:
-# -                logging.error(f"Błąd podczas zapisywania numeru paczki przewoźnika: {e}")
-# -        
-# -        # Obsługa różnych statusów
-# -        if status == "shipment_sent":
-# -            if row:
-# -                return self.update_shipment_sent(row, order_data)
-# -            else:
-# -                return self.create_transit_row(order_data)
-# -        elif status == "transit":
-# -            if row:
-# -                return self.update_transit(row, order_data)
-# -            if row:
-# -                return self.update_pickup(row, order_data)
-# -            else:
-# -                return self.create_pickup_row(order_data)
-# -        elif status == "delivered":
-# -            if row:
-# -                return self.update_delivered(row, order_data)
-# -            else:
-# -                logging.warning(f"Nie znaleziono wiersza dla przesyłki {package_number} do oznaczenia jako dostarczona")
-# -                return False
-# -        else:
-# -            logging.warning(f"Nieznany status {self.name}: {status}")
-# -            return False        else:
-# -                return self.create_transit_row(order_data)
-# -        elif status == "pickup":
-# -            if row:
-# -                return self.update_pickup(row, order_data)
-# -            else:
-# -                return self.create_pickup_row(order_data)
-# -        elif status == "delivered":
-# -            if row:
-# -                return self.update_delivered(row, order_data)
-# -            else:
-# -                logging.warning(f"Nie znaleziono wiersza dla przesyłki {package_number} do oznaczenia jako dostarczona")
-# -                return False
-# -        else:
-# -            logging.warning(f"Nieznany status {self.name}: {status}")
-# -            return False
-
-    
-    def update_notification(self, order_data):
-        """Aktualizuje dane powiadomienia"""
-        pass
-    
-    def update_transit(self, row, order_data):
-        """Aktualizuje wiersz dla paczki w transporcie"""
-        try:
-            # Aktualizuj status
-            status = f"W transporcie ({self.name})"
-            self.sheets_handler.worksheet.update_cell(row, 9, status)
-            
-            # Zapisz numer paczki
-            if order_data.get("package_number"):
-                self.sheets_handler.worksheet.update_cell(row, 13, order_data["package_number"])
-            
-            # Zastosuj kolor
-            self.sheets_handler.worksheet.format(f"A{row}:N{row}", {
-                "backgroundColor": self.colors["transit"]
-            })
-            
-            logging.info(f"Zaktualizowano wiersz {row} dla paczki {self.name} w transporcie")
-            return True
-        except Exception as e:
-            logging.error(f"Błąd podczas aktualizacji paczki {self.name} w transporcie: {e}")
-            return False
-    
-    def _find_row_by_carrier_package(self, carrier_package_number):
-            """Znajduje wiersz na podstawie numeru paczki przewoźnika (kolumna O)"""
-            try:
-                if not carrier_package_number:
-                    return None
-                    
-                # Pobierz wszystkie dane
-                all_data = self.sheets_handler.worksheet.get_all_values()
-                package_number_col = 14  # Kolumna O = indeks 14
-                order_number_col = 12   # Kolumna M = indeks 12
-                
-                # Szukaj wiersza z numerem paczki
-                for i, row in enumerate(all_data):
-                    if i == 0:  # Pomijamy nagłówek
-                        continue
-                        
-                    # Sprawdź czy numer paczki znajduje się w kolumnie O (package_number)
-                    if len(row) > package_number_col and row[package_number_col] and carrier_package_number in row[package_number_col]:
-                        return i + 1  # Numery wierszy w API są 1-based
-                    
-                    # Sprawdź również kolumnę M (order_number)
-                    if len(row) > order_number_col and row[order_number_col] and carrier_package_number in row[order_number_col]:
-                        return i + 1
+    def get_status_priority(self, status):
+        """Zwraca priorytet statusu (im wyższy, tym ważniejszy)"""
+        status = status.lower()
         
-                return None
-            
-            except Exception as e:
-                logging.error(f"Błąd podczas szukania wiersza po numerze paczki: {e}")
-                return None        
-            
-    def _find_row_by_email(self, email):
-        """Znajduje wiersz z podanym adresem email w kolumnie A"""
-        try:
-            if not email:
-                return None
-                
-            # Pobierz wszystkie dane
-            all_data = self.sheets_handler.worksheet.get_all_values()
-            email_col = 0  # Kolumna A = indeks 0
-            
-            # Szukaj wiersza z podanym adresem email
-            for i, row in enumerate(all_data):
-                if i == 0:  # Pomijamy nagłówek
-                    continue
-                    
-                # Sprawdź czy adres email pasuje
-                if row[email_col] and email.lower() in row[email_col].lower():
-                    return i + 1  # Numery wierszy w API są 1-based
-            
-            # Jeśli nie znaleziono, sprawdź również kolumnę J (dostępne emaile)
-            avail_email_col = 9  # Kolumna J = indeks 9
-            for i, row in enumerate(all_data):
-                if i == 0:  # Pomijamy nagłówek
-                    continue
-                    
-                # Sprawdź czy adres email znajduje się w dostępnych emailach
-                if row[avail_email_col] and email.lower() in row[avail_email_col].lower():
-                    return i + 1  # Numery wierszy w API są 1-based
-            
-            return None
-                
-        except Exception as e:
-            logging.error(f"Błąd podczas szukania wiersza z adresem email: {e}")
-            return None
-        
-    def update_pickup(self, row, order_data):
-        """
-        Aktualizuje wiersz dla przesyłki gotowej do odbioru - wersja do dziedziczenia
-        
-        Aktualizuje następujące kolumny:
-        - email
-        - receive place
-        - receive code (PIN)
-        - time to receive
-        - available hours
-        - status
-        - QR
-        - info
-        - carrier package nr
-        """
-        try:
-            updates = []
-            
-            # Kolumna 1 - Email
-            if order_data.get("email"):
-                self.sheets_handler.worksheet.update_cell(row, 1, order_data["email"])
-                updates.append("email")
-            
-            # Kolumna 3 - Miejsce odbioru
-            if order_data.get("pickup_location") or order_data.get("delivery_address"):
-                address = order_data.get("pickup_location") or order_data.get("delivery_address")
-                self.sheets_handler.worksheet.update_cell(row, 3, address)
-                updates.append("miejsce odbioru")
-                
-            # Kolumna 5 - Kod odbioru (PIN)
-            if order_data.get("pickup_code"):
-                self.sheets_handler.worksheet.update_cell(row, 5, order_data["pickup_code"])
-                updates.append("kod odbioru")
-                
-            # Kolumna 6 - Termin odbioru
-            if order_data.get("pickup_deadline") or order_data.get("expected_delivery_date"):
-                deadline = order_data.get("pickup_deadline") or order_data.get("expected_delivery_date")
-                self.sheets_handler.worksheet.update_cell(row, 6, deadline)
-                updates.append("termin odbioru")
-                                
-            # Kolumna 9 - Status
-            status_text = "Gotowe do odbioru"
-            if self.name:
-                status_text += f" ({self.name})"
-            self.sheets_handler.worksheet.update_cell(row, 9, status_text)
-            updates.append("status")
-            
-            # Kolumna 12 - QR
-            if order_data.get("qr_code"):
-                self.sheets_handler.worksheet.update_cell(row, 12, order_data["qr_code"])
-                updates.append("QR kod")
-                
-            # Kolumna 13 - Numer paczki
-            if order_data.get("package_number"):
-                self.sheets_handler.worksheet.update_cell(row, 13, order_data["package_number"])
-                updates.append("numer paczki")
-                
-            # Kolumna 14 - Info
-            if order_data.get("info"):
-                self.sheets_handler.worksheet.update_cell(row, 14, order_data["info"])
-                updates.append("info")
-                
-            # Kolumna 15 - Numer paczki przewoźnika
-            if order_data.get("carrier_package_number"):
-                self.sheets_handler.worksheet.update_cell(row, 15, order_data["carrier_package_number"])
-                updates.append("carrier package number")
-                
-            # Zastosuj kolorowanie
-            self.sheets_handler.worksheet.format(f"A{row}:O{row}", {
-                "backgroundColor": self.colors.get("pickup", "#FFFF00")  # Domyślnie żółty jeśli nie zdefiniowano
-            })
-            
-            logging.info(f"Zaktualizowano wiersz {row} dla paczki gotowej do odbioru - {', '.join(updates)}")
-            return True
-            
-        except Exception as e:
-            logging.error(f"Błąd podczas aktualizacji statusu pickup: {e}")
-            return False
-    
-    # def update_all(self, row, order_data):
-    #     """Aktualizuje wszystkie niepuste komórki w wierszu"""
-    #     try:
-
-    def update_delivered(self, row, order_data):
-        """Aktualizuje wiersz dla paczki dostarczonej"""
-        try:
-            # Aktualizuj status
-            status = f"Dostarczono ({self.name})"
-            self.sheets_handler.worksheet.update_cell(row, 9, status)
-            
-            # Zastosuj kolor
-            self.sheets_handler.worksheet.format(f"A{row}:N{row}", {
-                "backgroundColor": self.colors["delivered"]
-            })
-            
-            logging.info(f"Zaktualizowano wiersz {row} dla paczki {self.name} dostarczonej")
-            return True
-        except Exception as e:
-            logging.error(f"Błąd podczas aktualizacji dostarczonej paczki {self.name}: {e}")
-            return False
-    
-    def create_transit_row(self, order_data):
-        """Tworzy nowy wiersz dla paczki w transporcie"""
-        pass
-    
-    def create_pickup_row(self, order_data):
-        """Tworzy nowy wiersz dla paczki gotowej do odbioru"""
-        pass
-            
-    def general_get_status_text(self, status):
-        """Zwraca tekst statusu w zależności od kodu"""
-        status_map = {
-            "shipment_sent": f"Przesyłka nadana ({self.name})",
-            "transit": f"W transporcie ({self.name})",
-            "pickup": f"Gotowa do odbioru ({self.name})",
-            "delivered": f"Dostarczona ({self.name})",
-            "confirmed": f"Zamówienie potwierdzone ({self.name})"
-        }
-        return status_map.get(status, f"Status nieznany: {status}")
-    
-    def general_update_sheet_data(self, order_data):
-        """
-        Uniwersalna funkcja aktualizująca dane w arkuszu na podstawie słownika order_data.
-        Aktualizuje tylko pola, które nie są puste.
-        
-        Args:
-            order_data: Słownik z danymi wyekstrahowanymi przez OpenAI
-        
-        Returns:
-            bool: True jeśli aktualizacja się powiodła, False w przeciwnym przypadku
-        """
-        try:
-            # Znajdź wiersz na podstawie różnych identyfikatorów
-            package_number = order_data.get("package_number")
-            row = self._find_row_by_carrier_package(package_number) if package_number else None
-            
-            # Jeśli nie znaleziono, próbuj po emailu
-            if not row and order_data.get("email"):
-                row = self._find_row_by_email(order_data.get("email"))
-            
-            # Jeśli dalej nie znaleziono, utwórz nowy wiersz
-            if not row:
-                 row = self.general_create_row(order_data)
-                 return self._process_row_update_and_delivery(row, order_data)
-            else:
-                logging.info(f"Znaleziono wiersz {row} dla przesyłki {self.name} o numerze paczki {package_number}")
-                    # ✅ SPRAWDŹ OBECNY STATUS PRZED AKTUALIZACJĄ
-                existing_data = self.sheets_handler.worksheet.row_values(row)
-                status_col = 9  # Kolumna I (status)
-                
-                current_status = None
-                if len(existing_data) >= status_col:
-                    current_status = existing_data[status_col-1]
-                    logging.info(f"📊 Obecny status w arkuszu: '{current_status}'")
-                
-                new_status = order_data.get("status", "unknown")
-                logging.info(f"📊 Nowy status z emaila: '{new_status}'")
-                
-                # ✅ SPRAWDŹ PRIORYTETY STATUSÓW
-                current_priority = self.get_status_priority(current_status)
-                new_priority = self.get_status_priority(new_status)
-                
-                logging.info(f"📊 Priorytet obecny: {current_priority}, priorytet nowy: {new_priority}")
-                
-                # ✅ BLOKUJ COFANIE SIĘ STATUSÓW
-                if current_priority > new_priority:
-                    logging.warning(f"🚫 BLOKUJĘ aktualizację: obecny status '{current_status}' (priorytet {current_priority}) jest późniejszy niż nowy '{new_status}' (priorytet {new_priority})")
-                    return True  # Zwróć sukces ale nie aktualizuj
-                
-                elif current_priority == new_priority and current_status == new_status:
-                    logging.info(f"ℹ️ Status się nie zmienił: '{current_status}' → '{new_status}'")
-                    # Kontynuuj aktualizację - mogą być inne dane do zaktualizowania
-                
-                else:
-                    logging.info(f"✅ DOZWOLONA aktualizacja statusu: '{current_status}' → '{new_status}' (priorytet {current_priority} → {new_priority})")
-            
-
-            # Aktualizuj pola, które nie są puste
-            updates = []
-            
-            # Mapowanie kluczy order_data na kolumny w arkuszu
-            field_mappings = {
-                "email": 1,                    # A - Email
-                "product_name": 2,             # B - Nazwa produktu
-                "pickup_location": 3,          # C - Miejsce odbioru/dostawy
-                "delivery_address": 3,         # C - Miejsce odbioru/dostawy (alternatywnie)
-                "phone_number": 4,             # D - Numer telefonu
-                "pickup_code": 5,              # E - Kod odbioru
-                "pickup_deadline": 6,          # F - Termin odbioru
-                "delivery_date": 6,            # F - Data dostarczenia (ta sama kolumna)
-                "available_hours": 7,          # G - Godziny dostępności
-                "email_date": 8,  
-                "item link" :11,              # H - Nr order
-                "qr_code": 12,                 # L - Kod QR
-                "order_number": 13,            # M - Order number (zmienione)
-                "info": 14,                    # N - Informacje
-                "package_number": 15,
-                                      # O - Package number (zmienione)
-            }
-            
-            # Status (kolumna I - 9)
-            if order_data.get("status"):
-                status_text = self.general_get_status_text(order_data["status"])
-                self.sheets_handler.worksheet.update_cell(row, 9, status_text)
-                updates.append("status")
-            
-            # Aktualizuj pozostałe pola
-            for field, column in field_mappings.items():
-                if field in order_data and order_data[field]:
-                    # ✅ SPECJALNE FORMATOWANIE DLA ORDER_NUMBER
-                    if field == "order_number":
-                        # Formatuj jako tekst z apostrofem na początku
-                        formatted_value = f"'{str(order_data[field])}"
-                        logging.info(f"🔢 Formatuję order_number jako tekst: '{order_data[field]}' → '{formatted_value}'")
-                    else:
-                        # Zwykłe formatowanie dla innych pól
-                        formatted_value = order_data[field]
-        
-                    self.sheets_handler.worksheet.update_cell(row, column, formatted_value)
-                    updates.append(field)
-            
-            # Zastosuj odpowiednie kolorowanie w zależności od statusu
-            status = order_data.get("status")
-            logging.info(f"🎨 Sprawdzanie koloru dla statusu: '{status}'")
-            
-            if status:
-                # DODAJ OBSŁUGĘ STATUSU 'transit'
-                if status in ["shipment_sent"]:
-                    color_key = "shipment_sent"
-                elif status == "confirmed":
-                    color_key = "confirmed"
-                elif status == "transit":  # ✅ DODAJ TĘ LINIĘ!
-                    color_key = "transit"
-                elif status == "pickup":
-                    color_key = "pickup"
-                elif status == "delivered":
-                    color_key = "delivered"
-                elif status == "closed":
-                    color_key = "closed"
-                elif status == "unknown":
-                    color_key = "unknown"      
-                else:
-                    color_key = "transit"  # Domyślnie
-                    logging.warning(f"⚠️ Nieznany status '{status}', używam domyślnego koloru")
-                    
-                # Sprawdź czy kolor istnieje w definicji
-                if color_key not in self.colors:
-                    logging.error(f"❌ Brak koloru '{color_key}' w self.colors: {list(self.colors.keys())}")
-                    # ✅ FALLBACK DO PIERWSZEGO DOSTĘPNEGO KOLORU
-                    available_colors = list(self.colors.keys())
-                    color_key = available_colors[0] if available_colors else None
-                    logging.info(f"🔄 Używam fallback koloru: {color_key}")
-                    
-                if color_key and color_key in self.colors:
-                    color_to_apply = self.colors[color_key]
-                    logging.info(f"🎨 Stosując kolor {color_key}: {color_to_apply}")
-                    
-                    # Zastosuj kolorowanie
-                    self.sheets_handler.worksheet.format(f"A{row}:O{row}", {
-                        "backgroundColor": color_to_apply
-                    })
-                
-                logging.info(f"✅ Zastosowano kolor {color_key} dla statusu '{status}' w wierszu {row}")
-                
-                # ✅ DODAJ FORMATOWANIE TEKSTU DLA STATUSÓW ODBIORU
-                self._apply_text_formatting(row, status)
-
-            else:
-                logging.warning("⚠️ Brak statusu w danych - nie można zastosować kolorowania")
-        
-            logging.info(f"Zaktualizowano wiersz {row} dla przesyłki {self.name}: {', '.join(updates)}")
-
-            return self._process_row_update_and_delivery(row, order_data)
-            # Przeniesienie wiersza do delivery
-            # try:
-            #     logging.info(f"Przenoszenie wiersza {row} do sekcji dostarczonych")
-            #     # logging.info(f"📋 Wartości updates przed wysłaniem: {updates}")
-            #     # logging.info(f"📊 Szczegóły updates: {[f'{i}: {val}' for i, val in enumerate(updates)]}")
-
-            #     # ✅ POBIERZ ISTNIEJĄCE DANE Z WIERSZA
-            #     existing_data = self.sheets_handler.worksheet.row_values(row)
-            #     logging.info(f"📋 Istniejące dane z wiersza {row}: {existing_data}")
-                
-            #     # ✅ SKOPIUJ DANE I ZAKTUALIZUJ TYLKO NIEPUSTE POLA
-            #     updates = existing_data.copy() if existing_data else [""] * 15
-                
-
-            #     range_end = "O"  # Kolumna O
-            #     range_to_update = f"A{row}:{range_end}{row}"
-                
-            #     # ✅ WYKORZYSTAJ DELIVERED MANAGER DO AKTUALIZACJI
-            #     delivered_manager = DeliveredOrdersManager(self.sheets_handler)
-                
-            #     # 1. Aktualizacja danych
-            #     if not delivered_manager.safe_update_with_retry(range_to_update, updates):
-            #         return False
-                
-            #     # 2. Kolorowanie
-            #     status = order_data.get("status")
-            #     delivered_manager.safe_apply_formatting(row, range_end, status, self.colors)
-                
-            #     # 3. Obsługa dostarczonych zamówień
-            #     delivered_moved = delivered_manager.handle_delivered_order_after_update(row, status)
-                
-            #     if delivered_moved:
-            #         logging.info(f"🎉 Zaktualizowano i przeniesiono dostarczone zamówienie z wiersza {row}")
-            #     else:
-            #         logging.info(f"🎉 Zaktualizowano wiersz {row} dla {self.name}")
-                
-            #     return True
-                
-            # except Exception as e:
-            #     logging.error(f"❌ Błąd podczas przenoszenia danych w arkuszu: {e}")
-            #     return False
-            
-        
-        except Exception as e:
-            logging.error(f"Błąd podczas aktualizacji danych w arkuszu: {e}")
-            return False
-    
-    def general_create_row(self, order_data):
-        """
-        Uniwersalna funkcja tworząca nowy wiersz w arkuszu na podstawie danych order_data
-        
-        Kolumny arkusza:
-        A: email
-        B: what ordered (produkt)
-        C: receive place (miejsce odbioru)
-        D: nr tel
-        E: receive code (kod odbioru)
-        F: time to receive (termin odbioru)
-        G: available hours (godziny dostępności)
-        H: email_date
-        I: status
-        J: available emails
-        K: item link
-        L: QR kod
-        M: order number (numer zamówienia)
-        N: info (informacje)
-        O: package number (numer paczki)
-        """
-        try:
-            # Pobierz dane z order_data lub ustaw wartości domyślne
-            email = order_data.get("email", "")
-            product_name = order_data.get("product_name", "")
-            
-            # Miejsce odbioru/dostawy - użyj pickup_location lub delivery_address
-            receive_place = order_data.get("pickup_location") or order_data.get("delivery_address", "")
-            
-            phone_number = order_data.get("phone_number", "")
-            pickup_code = order_data.get("pickup_code", "")
-            
-            # Termin odbioru/dostawy - użyj pickup_deadline lub expected_delivery_date
-            time_to_receive = order_data.get("pickup_deadline") or order_data.get("delivery_date") or order_data.get("expected_delivery_date", "")
-            
-            available_hours = order_data.get("available_hours", "")
-            nr_order = order_data.get("nr_order", "")
-            
-            # Status - określ na podstawie pola status
-            status = order_data.get("status", "")
-            status_text = self.general_get_status_text(status)
-            
-            # Dodatkowe dane
-            item_link = order_data.get("item_link", "")
-            qr_code = order_data.get("qr_code", "")
-            order_number = order_data.get("order_number", "")
-            info = order_data.get("info", "")
-            package_number = order_data.get("package_number", "")
-            email_date = order_data.get("email_date", "")
-
-            # Przygotuj dane wiersza (USUŃ email z kolumny P)
-            row_data = [
-                email,              # A: email
-                product_name,       # B: what ordered
-                receive_place,      # C: receive place
-                phone_number,       # D: nr tel
-                pickup_code,        # E: receive code
-                time_to_receive,    # F: time to receive
-                available_hours,    # G: available hours
-                email_date,         # H:  email_date
-                status_text,        # I: status
-                "",                 # J: res.
-                item_link,          # K: item link
-                qr_code,            # L: QR
-                order_number,       # M: order number
-                info,               # N: info
-                package_number      # O: package number
-            ]
-            
-            # Znajdź pierwszy wolny wiersz
-            values = self.sheets_handler.worksheet.get_all_values()
-            next_row = len(values) + 1
-            cell_range = f"A{next_row}:O{next_row}"  # ✅ ZMIEŃ Z P NA O
-            
-            # Dodaj wiersz
-            self.sheets_handler.worksheet.update(cell_range, [row_data])
-            
-            # Zastosuj kolor w zależności od statusu
-            if status == "confirmed" or status == "shipment_sent" or status == "transit":
-                color = self.colors.get("transit", {"red": 0.95, "green": 0.95, "blue": 0.95})
-            elif status == "pickup":
-                color = self.colors.get("pickup", {"red": 0.95, "green": 0.95, "blue": 0.95})
-            elif status == "delivered":
-                color = self.colors.get("delivered", {"red": 0.8, "green": 0.9, "blue": 0.8})
-            else:
-                color = self.colors.get("transit", {"red": 0.95, "green": 0.95, "blue": 0.95})
-            
-            self.sheets_handler.worksheet.format(f"A{next_row}:O{next_row}", {
-                "backgroundColor": color
-            })
-            self._apply_text_formatting(next_row, status)
-            # self._apply_text_formatting(status, next_row)
-            # self.sheets_handler.worksheet.format(f"A{next_row}:O{next_row}", {
-            #     "textFormat": {
-            #         "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},  # np. czerwony tekst
-            #         "bold": True
-            #     }
-#               })
-
-            logging.info(f"Utworzono nowy wiersz {next_row} dla {self.name} o statusie {status}")
-            
-            # ✅ SPRAWDŹ DOSTĘPNOŚĆ MAILI PO UTWORZENIU WIERSZA
-            # try:
-            #     from carriers_sheet_handlers import EmailAvailabilityManager
-            #     email_availability_manager = EmailAvailabilityManager(self.sheets_handler)
-            #     email_availability_manager.check_email_availability()
-            #     logging.info("✅ Zaktualizowano dostępność maili w zakładce Accounts")
-            # except Exception as e:
-            #     logging.error(f"❌ Błąd podczas sprawdzania dostępności maili: {e}")
-        
-            return next_row
-            
-        except Exception as e:
-            logging.error(f"Błąd podczas tworzenia wiersza: {e}")
-            return False
-    
-    def _apply_text_formatting(self, row, status):
-        """Stosuje formatowanie tekstu w zależności od statusu"""
-        try:
-            # ✅ CZERWONA CZCIONKA TYLKO DLA STATUSÓW ODBIORU
-            pickup_statuses = [
-                "pickup", "ready_for_pickup",
-                "gotowa do odbioru", "gotowe do odbioru"
-            ]
-            
-            # Sprawdź czy status wymaga czerwonej czcionki
-            needs_red_text = False
-            if status:
-                status_lower = status.lower()
-                # Sprawdź bezpośredni status
-                if status_lower in pickup_statuses:
-                    needs_red_text = True
-                # Sprawdź czy zawiera słowa kluczowe
-                elif any(keyword in status_lower for keyword in ["gotowa do odbioru", "ready for pickup"]):
-                    needs_red_text = True
-            
-            if needs_red_text:
-                # ✅ ZASTOSUJ CZERWONĄ CZCIONKĘ DLA STATUSÓW ODBIORU
-                self.sheets_handler.worksheet.format(f"A{row}:O{row}", {
-                    "textFormat": {
-                        "foregroundColor": {"red": 1.0, "green": 0.0, "blue": 0.0},  # 🔴 CZERWONY
-                        "bold": True
-                    }
-                })
-                logging.info(f"🔴 Zastosowano czerwoną czcionkę dla statusu odbioru w wierszu {row}")
-            else:
-                # ✅ ZASTOSUJ CZARNĄ CZCIONKĘ DLA WSZYSTKICH INNYCH STATUSÓW
-                self.sheets_handler.worksheet.format(f"A{row}:O{row}", {
-                    "textFormat": {
-                        "foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0},  # ⚫ CZARNY
-                        "bold": False
-                    }
-                })
-                logging.info(f"⚫ Zastosowano czarną czcionkę dla statusu '{status}' w wierszu {row}")
-            
-            return True
-            
-        except Exception as e:
-            logging.error(f"❌ Błąd podczas formatowania tekstu: {e}")
-            return False
-        
-    def get_status_priority(self, status_text):
-        """
-        Zwraca priorytet statusu na podstawie tekstu statusu
-        
-        Args:
-            status_text: Tekst statusu z arkusza
-            
-        Returns:
-            int: Priorytet statusu (wyższa liczba = późniejszy status)
-        """
-        if not status_text:
+        # ✅ POPRAWKA: unknown ma najniższy priorytet!
+        if "unknown" in status or "nieznan" in status:
             return 0
             
-        status_lower = status_text.strip().lower()
-        
-        # ✅ SPRAWDŹ SŁOWA KLUCZOWE W STATUSIE
-        if any(keyword in status_lower for keyword in ['potwierdzone', 'confirmed']):
-            return 0  # Najwcześniejszy status
+        if "confirmed" in status or "zatwierdzon" in status:
+            return 1
+        if "shipment_sent" in status or "nadan" in status:
+            return 2
+        if "transit" in status or "transporcie" in status:
+            return 3
+        if "pickup" in status or "odbioru" in status:
+            return 4
+        if "delivered" in status or "dostarczon" in status or "odebran" in status:
+            return 5
+        if "canceled" in status or "anulowan" in status or "zwrot" in status:
+            return 6
             
-        elif any(keyword in status_lower for keyword in ['w transporcie', 'transit']):
-            return 1  # W drodze
-            
-        elif any(keyword in status_lower for keyword in ['nadana', 'sent', 'shipped']):
-            return 2  # Nadano
-            
-        elif any(keyword in status_lower for keyword in ['gotowa do odbioru', 'ready for pickup', 'pickup']):
-            return 3  # Gotowe do odbioru
-            
-        elif any(keyword in status_lower for keyword in ['dostarczona', 'delivered', 'dostarczono']):
-            return 4  # Dostarczone
-            
-        elif any(keyword in status_lower for keyword in ['zamknięte', 'closed', 'anulowane']):
-            return 6  # Zamknięte
-            
-        else:
-            return 5  # Nieznany status
-        
-    def _check_email_availability_after_update(self):
-            """
-            Sprawdza dostępność maili po aktualizacji danych
-            """
-            try:
-                logging.info("📧 Sprawdzanie dostępności maili po aktualizacji...")
-                email_manager = EmailAvailabilityManager(self.sheets_handler)
-                result = email_manager.check_email_availability()
-                
-                if result:
-                    logging.info("✅ Sprawdzenie dostępności maili zakończone sukcesem")
-                else:
-                    logging.warning("⚠️ Problem ze sprawdzaniem dostępności maili")
-                    
-            except Exception as e:
-                logging.error(f"❌ Błąd podczas sprawdzania dostępności maili: {e}")
+        return 1 # Domyślny niski priorytet dla innych statusów
 
-    def _process_row_update_and_delivery(self, row, order_data):
+    def update_shipment_sent(self, row, order_data):
         """
-        Przetwarza aktualizację wiersza i obsługuje przeniesienie dostarczonych zamówień
-        
-        Args:
-            row: Numer wiersza do aktualizacji
-            order_data: Dane zamówienia
-            
-        Returns:
-            bool: True jeśli operacja się powiodła
+        Specjalna obsługa statusu shipment_sent z zabezpieczeniem przed nadpisaniem innej paczki.
         """
+        # Pobierz istniejące dane z wiersza
         try:
-            logging.info(f"Przenoszenie wiersza {row} do sekcji dostarczonych")
+            existing_values = self.sheets_handler.worksheet.row_values(row)
+            # Uzupełnij do 15 kolumn
+            while len(existing_values) < 15: existing_values.append("")
             
-            # ✅ POBIERZ ISTNIEJĄCE DANE Z WIERSZA
-            existing_data = self.sheets_handler.worksheet.row_values(row)
-            logging.info(f"📋 Istniejące dane z wiersza {row}: {existing_data}")
+            existing_pkg = existing_values[14].strip() # Kolumna O
+            new_pkg = order_data.get("package_number", "").strip()
             
-            # ✅ SKOPIUJ DANE I ZAKTUALIZUJ TYLKO NIEPUSTE POLA
-            updates = existing_data.copy() if existing_data else [""] * 15       
-            range_end = "O"  # Kolumna O
-            range_to_update = f"A{row}:{range_end}{row}"
+            # ✅ ZABEZPIECZENIE: Jeśli wiersz ma już numer paczki, a my mamy inny -> NOWY WIERSZ
+            if existing_pkg and new_pkg and existing_pkg != new_pkg:
+                logging.warning(f"⚠️ KONFLIKT PACZEK: W wierszu {row} jest '{existing_pkg}', a mail ma '{new_pkg}'.")
+                logging.info("➡️ Tworzę NOWY wiersz dla tej drugiej paczki zamiast nadpisywać.")
+                return self.create_shipment_row(order_data)
+                
+        except Exception as e:
+            logging.error(f"Błąd podczas sprawdzania konfliktu paczek: {e}")
+
+        # Jeśli brak konfliktu, aktualizuj standardowo
+        return self.general_update_sheet_data(row, order_data, "shipment_sent")
+
+    def general_update_sheet_data(self, row, order_data, status_key):
+        """Ogólna metoda aktualizacji danych w arkuszu"""
+        try:
+            # 1. Pobierz obecny status z arkusza (Kolumna I - indeks 9)
+            current_status = self.sheets_handler.worksheet.cell(row, 9).value or ""
             
-            # ✅ LOG SZCZEGÓŁÓW PRZED WYSŁANIEM
-            logging.info(f"📋 FINALNE DANE DO AKTUALIZACJI:")
-            for i, value in enumerate(updates):
-                column_letter = chr(65 + i)  # A=65, B=66, etc.
-                logging.info(f"      {column_letter}: '{value}'")
+            # 2. Sprawdź priorytety
+            priority_current = self.get_status_priority(current_status)
+            priority_new = self.get_status_priority(status_key)
             
-            # ✅ WYKORZYSTAJ DELIVERED MANAGER DO AKTUALIZACJI
-            delivered_manager = DeliveredOrdersManager(self.sheets_handler)
+            logging.info(f"📊 Priorytety: Obecny={priority_current} ({current_status}), Nowy={priority_new} ({status_key})")
             
-            # 1. Aktualizacja danych
-            if not delivered_manager.safe_update_with_retry(range_to_update, updates):
+            # ✅ BLOKADA: Nie pozwól 'unknown' (0) nadpisać czegokolwiek wartościowego (>0)
+            if priority_new == 0 and priority_current > 0:
+                logging.warning(f"🚫 BLOKUJĘ aktualizację: Nie nadpisuję statusu '{current_status}' statusem 'unknown'.")
                 return False
+
+            # Jeśli nowy status ma niższy priorytet (np. cofamy się z Delivered na Transit), ignoruj
+            # Chyba że to reprocess i chcemy wymusić dane? W trybie ciągłym lepiej chronić.
+            if priority_new < priority_current:
+                logging.warning(f"🚫 BLOKUJĘ aktualizację: Nowy priorytet {priority_new} jest niższy niż obecny {priority_current}")
+                return False
+
+            # 3. Przygotuj dane do aktualizacji
+            updates = []
             
-            # 2. Kolorowanie
-            status = order_data.get("status")
-            delivered_manager.safe_apply_formatting(row, range_end, status, self.colors)
+            # Mapowanie pól na kolumny (1-based index)
+            # H: Data maila (8)
+            if order_data.get("email_date"):
+                updates.append({'range': f'H{row}', 'values': [[order_data["email_date"]]]})
             
-            # 3. Obsługa dostarczonych zamówień
-            delivered_moved = delivered_manager.handle_delivered_order_after_update(row, status)
+            # I: Status (9)
+            carrier_display = order_data.get("carrier", self.name)
+            status_text = status_key # Domyślnie klucz
             
-            if delivered_moved:
-                logging.info(f"🎉 Zaktualizowano i przeniesiono dostarczone zamówienie z wiersza {row}")
-            else:
-                logging.info(f"🎉 Zaktualizowano wiersz {row} dla {self.name}")
+            # Ładne teksty statusów
+            if status_key == "shipment_sent": status_text = f"Przesyłka nadana ({carrier_display})"
+            elif status_key == "pickup": status_text = f"Gotowa do odbioru ({carrier_display})"
+            elif status_key == "delivered": status_text = f"Dostarczona ({carrier_display})"
+            elif status_key == "transit": status_text = f"W transporcie ({carrier_display})"
+            elif status_key == "unknown": status_text = f"Status nieznany: {order_data.get('status', 'unknown')}"
             
+            updates.append({'range': f'I{row}', 'values': [[status_text]]})
+            
+            # M: Numer zamówienia (13) - tylko jeśli jest i nie ma "ul."
+            order_num = order_data.get("order_number", "")
+            if order_num and "ul." not in str(order_num).lower():
+                 updates.append({'range': f'M{row}', 'values': [[f"'{order_num}"]]})
+
+            # N: Info (14)
+            if order_data.get("info"):
+                updates.append({'range': f'N{row}', 'values': [[order_data["info"]]]})
+                
+            # O: Numer paczki (15)
+            pkg_num = order_data.get("package_number", "")
+            if pkg_num:
+                updates.append({'range': f'O{row}', 'values': [[f"'{pkg_num}"]]})
+
+            # Inne pola specyficzne (adres, linki)
+            if order_data.get("delivery_address"):
+                updates.append({'range': f'C{row}', 'values': [[order_data["delivery_address"]]]})
+            if order_data.get("item_link"):
+                updates.append({'range': f'K{row}', 'values': [[order_data["item_link"]]]})
+
+            # 4. Wykonaj aktualizację batchową
+            self.sheets_handler.worksheet.batch_update(updates)
+            
+            # 5. Formatowanie (kolory)
+            color = self.colors.get(status_key, self.colors.get("shipment_sent"))
+            if color:
+                self.sheets_handler.worksheet.format(f"A{row}:O{row}", {
+                    "backgroundColor": color,
+                    "textFormat": {"foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0}}
+                })
+                
+            # Przenieś do Delivered jeśli zakończone
+            if status_key == "delivered":
+                self.sheets_handler.move_row_to_delivered(row, order_data)
+                
+            logging.info(f"✅ Zaktualizowano wiersz {row} ({status_text})")
             return True
             
         except Exception as e:
-            logging.error(f"❌ Błąd podczas przenoszenia danych w arkuszu: {e}")
+            logging.error(f"Błąd aktualizacji arkusza: {e}")
             return False
+
+    def create_shipment_row(self, order_data):
+        """Tworzy NOWY wiersz dla przesyłki"""
+        return self.sheets_handler._direct_create_row(order_data)
+        
+    def process_notification(self, order_data):
+        """Domyślna obsługa powiadomienia (szukaj i aktualizuj)"""
+        # Najpierw szukaj po numerze paczki (najpewniejsze)
+        row = self.sheets_handler.find_package_row(order_data.get("package_number"))
+        
+        # Jeśli nie, szukaj po numerze zamówienia
+        if not row:
+            row = self.sheets_handler.find_order_row(order_data.get("order_number"))
+            
+        # Jeśli nie, szukaj po user_key (ale ostrożnie - weź ostatni aktywny)
+        if not row:
+            user_rows = self.sheets_handler.find_user_rows(order_data.get("user_key"))
+            if user_rows:
+                # Tu jest ryzyko, bierzemy ostatni wiersz usera
+                # Ale update_shipment_sent ma teraz zabezpieczenie przed nadpisaniem innej paczki!
+                row = user_rows[-1]
+
+        if row:
+            if order_data["status"] == "shipment_sent":
+                self.update_shipment_sent(row, order_data)
+            else:
+                self.general_update_sheet_data(row, order_data, order_data["status"])
+        else:
+            # Nie znaleziono wiersza - utwórz nowy
+            if order_data["status"] in ["shipment_sent", "transit", "confirmed"]:
+                self.create_shipment_row(order_data)
+            else:
+                logging.warning(f"Otrzymano status {order_data['status']} dla nieistniejącego zamówienia. Tworzę nowy wiersz.")
+                self.create_shipment_row(order_data)
         
 class InPostCarrier(BaseCarrier):
     """Klasa obsługująca przewoźnika InPost"""

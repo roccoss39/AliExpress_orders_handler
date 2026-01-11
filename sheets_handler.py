@@ -350,41 +350,35 @@ class SheetsHandler:
             return False
 
     def find_user_rows(self, user_key):
-        """Znajduje wszystkie wiersze należące do danego użytkownika"""
-        logging.debug(f"Wejście do funkcji: find_user_rows(user_key={user_key})")
-        if not user_key:
-            return []
-            
+        """
+        Znajduje numery wierszy dla danego użytkownika (user_key lub email).
+        Ignoruje wielkość liter.
+        """
         if not self.connected and not self.connect():
             return []
-        
+            
+        found_rows = []
         try:
-            all_values = self.worksheet.get_all_values()
-            found_rows = []
+            user_key = user_key.lower().strip()
             
-            # Sprawdź kolumnę A (email) i J (available emails)
-            for i, row in enumerate(all_values):
-                if i == 0:  # Pomiń nagłówek
-                    continue
-                    
-                # Sprawdź kolumnę A (email)
-                if row[0] and (user_key in row[0] or row[0] in user_key):
-                    found_rows.append(i + 1)  # +1 bo indeksowanie wierszy w API zaczyna się od 1
-                    continue
-                    
-                # Sprawdź kolumnę J (available emails)
-                if len(row) > 9 and row[9] and (user_key in row[9] or any(key in row[9] for key in [user_key, user_key.split('@')[0]])):
-                    found_rows.append(i + 1)
+            # Pobierz całą kolumnę A (maile)
+            emails_col = self.worksheet.col_values(1)
             
-            if found_rows:
-                logging.info(f"Znaleziono {len(found_rows)} wierszy dla użytkownika {user_key}: {found_rows}")
-            else:
-                logging.warning(f"Nie znaleziono żadnych wierszy dla użytkownika {user_key}")
+            # Przeszukaj (indeksowanie w gspread od 1)
+            for i, email_val in enumerate(emails_col):
+                if not email_val: continue
                 
+                # Sprawdź czy to ten sam email (ignorując wielkość liter)
+                clean_email = str(email_val).lower().strip()
+                clean_key_from_email = clean_email.split('@')[0]
+                
+                # Porównaj pełny email LUB sam klucz użytkownika
+                if user_key == clean_email or user_key == clean_key_from_email:
+                    found_rows.append(i + 1) # +1 bo wiersze są od 1
+                    
             return found_rows
-                
         except Exception as e:
-            logging.error(f"Błąd podczas wyszukiwania wierszy użytkownika: {e}")
+            logging.error(f"Błąd szukania wierszy użytkownika: {e}")
             return []
 
     

@@ -2,7 +2,8 @@ import os
 from dotenv import load_dotenv
 
 # Załaduj zmienne środowiskowe z pliku .env
-load_dotenv()
+
+load_dotenv(override=True)
 
 # Tryb śledzenia emaili:
 # 'CONFIG'   - sprawdza wszystkie maile zdefiniowane w ALL_EMAIL_CONFIGS (stara metoda)

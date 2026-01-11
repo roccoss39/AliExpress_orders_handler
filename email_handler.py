@@ -7,9 +7,9 @@ import config
 import logging
 import json
 import os
-import time  # Dodaj ten import
+import time
 from openai_handler import OpenAIHandler
-import pytz  # DODAJ TO
+import pytz
 from email.utils import parsedate_to_datetime
 
 class EmailHandler:
@@ -55,11 +55,17 @@ class EmailHandler:
         self.local_tz = pytz.timezone('Europe/Warsaw')  # DODAJ TO
 
     def _load_mappings(self):
-        """Wczytuje zapisane mapowania z pliku"""
+        """Wczytuje zapisane mapowania z pliku i normalizuje klucze"""
         if os.path.exists(self.mappings_file):
             try:
-                with open(self.mappings_file, 'r') as f:
-                    return json.load(f)
+                with open(self.mappings_file, 'r', encoding='utf-8') as f:
+                    raw_data = json.load(f)
+                    # ✅ NORMALIZACJA PRZY ODCZYCIE (wymuś małe litery)
+                    normalized_data = {}
+                    for key, value in raw_data.items():
+                        normalized_key = key.lower().strip()
+                        normalized_data[normalized_key] = value
+                    return normalized_data
             except Exception as e:
                 logging.error(f"Błąd podczas ładowania mapowań: {e}")
         return {}
@@ -73,43 +79,63 @@ class EmailHandler:
             logging.info(f"Zapisano mapowania do {self.mappings_file}")
         except Exception as e:
             logging.error(f"Błąd podczas zapisywania mapowań: {e}")
-    
+
+    # --- Usunięto zduplikowane definicje ---
+
     def _save_user_order_mapping(self, user_key, order_number):
-        """Zapisuje powiązanie użytkownika z numerem zamówienia - tylko jedno aktywne"""
+        """Zapisuje powiązanie użytkownika z numerem zamówienia - ROZSZERZONA WERSJA"""
         if not user_key or not order_number:
             return
             
+        # Znormalizuj klucz użytkownika
+        user_key = user_key.lower()
+
         if user_key not in self.user_mappings:
-            self.user_mappings[user_key] = {"order_numbers": [], "package_numbers": []}
+            self.user_mappings[user_key] = {
+                "order_numbers": [], 
+                "package_numbers": [],
+                "last_email_date": None  # DODAJ POLE NA DATĘ
+            }
         
         if "order_numbers" not in self.user_mappings[user_key]:
             self.user_mappings[user_key]["order_numbers"] = []
+        
+        # Dodaj last_email_date jeśli nie istnieje
+        if "last_email_date" not in self.user_mappings[user_key]:
+            self.user_mappings[user_key]["last_email_date"] = None
             
         # Jeśli użytkownik już ma zamówienia, dodaj nowe tylko jeśli jest unikalne
         if order_number not in self.user_mappings[user_key]["order_numbers"]:
-            # Jedna uwaga: skoro w danym czasie użytkownik może mieć tylko jedno zamówienie,
-            # możemy zresetować listę i dodać tylko najnowsze, ale zachowamy historię dla bezpieczeństwa
             self.user_mappings[user_key]["order_numbers"].append(order_number)
             logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> zamówienie {order_number}")
             self._save_mappings()
-        
+
     def _save_user_package_mapping(self, user_key, package_number):
-        """Zapisuje powiązanie użytkownika z numerem paczki"""
+        """Zapisuje powiązanie użytkownika z numerem paczki - ROZSZERZONA WERSJA"""
         if not user_key or not package_number:
             return
             
+        # Znormalizuj klucz użytkownika
+        user_key = user_key.lower()
+
         if user_key not in self.user_mappings:
-            self.user_mappings[user_key] = {"order_numbers": [], "package_numbers": []}
+            self.user_mappings[user_key] = {
+                "order_numbers": [], 
+                "package_numbers": [],
+                "last_email_date": None  # DODAJ POLE NA DATĘ
+            }
         
         if "package_numbers" not in self.user_mappings[user_key]:
             self.user_mappings[user_key]["package_numbers"] = []
+            
+        # Dodaj last_email_date jeśli nie istnieje
+        if "last_email_date" not in self.user_mappings[user_key]:
+            self.user_mappings[user_key]["last_email_date"] = None
             
         if package_number not in self.user_mappings[user_key]["package_numbers"]:
             self.user_mappings[user_key]["package_numbers"].append(package_number)
             logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> paczka {package_number}")
             self._save_mappings()
-        
-    
     
     def fetch_new_emails(self, email_configs_override=None):
         """
@@ -506,7 +532,7 @@ class EmailHandler:
                 user_key = None
                 if recipient:
                     # Użyj części przed @ jako klucza użytkownika
-                    user_key = recipient.split('@')[0]
+                    user_key = recipient.split('@')[0].lower()
                     logging.info(f"Użyto klucza użytkownika: {user_key}")
 
                 if not email_date:
@@ -718,54 +744,6 @@ class EmailHandler:
         except Exception as e:
             logging.error(f"Błąd podczas zapisywania daty emaila użytkownika {user_key}: {e}")
 
-    def _save_user_order_mapping(self, user_key, order_number):
-        """Zapisuje powiązanie użytkownika z numerem zamówienia - ROZSZERZONA WERSJA"""
-        if not user_key or not order_number:
-            return
-            
-        if user_key not in self.user_mappings:
-            self.user_mappings[user_key] = {
-                "order_numbers": [], 
-                "package_numbers": [],
-                "last_email_date": None  # DODAJ POLE NA DATĘ
-            }
-        
-        if "order_numbers" not in self.user_mappings[user_key]:
-            self.user_mappings[user_key]["order_numbers"] = []
-        
-        # Dodaj last_email_date jeśli nie istnieje
-        if "last_email_date" not in self.user_mappings[user_key]:
-            self.user_mappings[user_key]["last_email_date"] = None
-            
-        # Jeśli użytkownik już ma zamówienia, dodaj nowe tylko jeśli jest unikalne
-        if order_number not in self.user_mappings[user_key]["order_numbers"]:
-            self.user_mappings[user_key]["order_numbers"].append(order_number)
-            logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> zamówienie {order_number}")
-            self._save_mappings()
-
-    def _save_user_package_mapping(self, user_key, package_number):
-        """Zapisuje powiązanie użytkownika z numerem paczki - ROZSZERZONA WERSJA"""
-        if not user_key or not package_number:
-            return
-            
-        if user_key not in self.user_mappings:
-            self.user_mappings[user_key] = {
-                "order_numbers": [], 
-                "package_numbers": [],
-                "last_email_date": None  # DODAJ POLE NA DATĘ
-            }
-        
-        if "package_numbers" not in self.user_mappings[user_key]:
-            self.user_mappings[user_key]["package_numbers"] = []
-            
-        # Dodaj last_email_date jeśli nie istnieje
-        if "last_email_date" not in self.user_mappings[user_key]:
-            self.user_mappings[user_key]["last_email_date"] = None
-            
-        if package_number not in self.user_mappings[user_key]["package_numbers"]:
-            self.user_mappings[user_key]["package_numbers"].append(package_number)
-            logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> paczka {package_number}")
-            self._save_mappings()
         
     def connect_to_email_account(self, email_config):
             """
