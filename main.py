@@ -241,12 +241,33 @@ def main_loop():
                                 logging.warning(f"Nieznany przewoźnik: {carrier_name}")
 
                 if order_data.get("status") == "delivered":
-                        logging.info(f"🧹 Status 'delivered' wykryty w pętli głównej. Usuwam mapowanie dla {order_data.get('user_key')}...")
-                        email_handler.remove_user_mapping(
-                            order_data.get("user_key"),
-                            order_data.get("package_number"),
-                            order_data.get("order_number")
-                        )
+                    user_key = order_data.get("user_key")
+                    logging.info(f"🧹 Status 'delivered'. Usuwam mapowanie dla {user_key}...")
+                    
+                    # Wywołaj usuwanie i sprawdź czy usunięto całego usera
+                    user_deleted = email_handler.remove_user_mapping(
+                        user_key,
+                        order_data.get("package_number"),
+                        order_data.get("order_number")
+                    )
+                    
+                    # Jeśli użytkownik został całkowicie usunięty z JSONa (bo nie ma innych paczek)
+                    if user_deleted:
+                        logging.info(f"👤 Użytkownik {user_key} nie ma więcej paczek. Zwalniam konto w Accounts...")
+                        
+                        # Pobierz pełny email z danych zamówienia
+                        email_address = order_data.get("email")
+                        
+                        # Użyj managera dostępności żeby wyczyścić arkusz
+                        if email_address:
+                            # Musisz utworzyć instancję managera, jeśli jej nie masz w tym miejscu
+                            # W main_loop zazwyczaj jest 'email_availability_manager' zadeklarowany wyżej
+                            if 'email_availability_manager' in locals():
+                                email_availability_manager.free_up_account(email_address)
+                            else:
+                                # Fallback (tworzymy na chwilę)
+                                temp_manager = EmailAvailabilityManager(sheets_handler)
+                                temp_manager.free_up_account(email_address)
 
             # ✅ SPRAWDZAJ MAILE TYLKO GDY BYŁY ZMIANY
             if len(processed_emails) > 0 or first_run:

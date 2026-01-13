@@ -1326,13 +1326,69 @@ class EmailAvailabilityManager:
             logging.error(traceback.format_exc())
             return []
 
-    def check_email_availability(self):
+    # W pliku carriers_sheet_handlers.py wewnątrz klasy EmailAvailabilityManager
+
+    def free_up_account(self, email):
         """
-        Sprawdza dostępność maili (czy są zajęte przez aktywne zamówienia)
-        i aktualizuje statusy/kolory w zakładce Accounts.
+        Konto jest jednorazowe! Usuwa wiersz z arkusza Accounts.
+        Wersja NIEWRAŻLIWA NA WIELKOŚĆ LITER (Pacek == pacek).
         """
-        if not self.worksheet:
-            return
+        # ✅ ZMIANA 1: Zamień email wejściowy na małe litery
+        clean_email = str(email).strip().lower()
+        
+        logging.info(f"💣 [DEBUG] START free_up_account: Próba usunięcia konta: '{clean_email}' (znormalizowane)")
+
+        try:
+            # 1. Znajdź arkusz Accounts
+            accounts_sheet = None
+            try:
+                if hasattr(self.sheets_handler, 'worksheet'):
+                    accounts_sheet = self.sheets_handler.worksheet.spreadsheet.worksheet("Accounts")
+                elif hasattr(self.sheets_handler, 'spreadsheet'):
+                    accounts_sheet = self.sheets_handler.spreadsheet.worksheet("Accounts")
+                else:
+                    accounts_sheet = self.sheets_handler.workbook.worksheet("Accounts")
+                
+                logging.info("✅ [DEBUG] Arkusz 'Accounts' załadowany.")
+            except Exception as e:
+                logging.error(f"❌ [DEBUG] Nie udało się pobrać arkusza 'Accounts': {e}")
+                return
+
+            # 2. Pobierz całą kolumnę A i szukaj ręcznie (najpewniejsza metoda przy problemach z wielkością liter)
+            logging.info(f"🔍 [DEBUG] Pobieram kolumnę A i szukam '{clean_email}' ignorując wielkość liter...")
+            
+            try:
+                col_values = accounts_sheet.col_values(1)
+                found = False
+                
+                # Iterujemy po wierszach sprawdzając każdy
+                for idx, val in enumerate(col_values):
+                    # ✅ ZMIANA 2: Porównujemy wszystko jako małe litery
+                    current_val = str(val).strip().lower()
+                    
+                    if current_val == clean_email:
+                        row = idx + 1 # Gspread liczy wiersze od 1
+                        logging.info(f"📍 [DEBUG] ZNALAZŁEM! '{current_val}' pasuje do '{clean_email}' w wierszu {row}")
+                        
+                        logging.info(f"🗑️ [DEBUG] Usuwam wiersz {row}...")
+                        accounts_sheet.delete_rows(row)
+                        logging.info(f"✅ [DEBUG] SUKCES: Wiersz {row} usunięty. Konto skasowane.")
+                        found = True
+                        break
+                
+                if not found:
+                    logging.warning(f"⚠️ [DEBUG] Nie znaleziono emaila '{clean_email}' w arkuszu (sprawdzono {len(col_values)} wierszy).")
+                    # Wypisz dla pewności co tam jest
+                    if len(col_values) > 0:
+                        logging.info(f"👀 Przykładowe wartości w arkuszu: {col_values[:5]}")
+
+            except Exception as search_err:
+                logging.error(f"❌ [DEBUG] Błąd podczas przeszukiwania kolumny: {search_err}")
+
+        except Exception as e:
+            logging.error(f"❌ [DEBUG] Krytyczny błąd w free_up_account: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
 
         try:
             logging.info("🔍 Sprawdzanie dostępności maili w zakładce Accounts...")

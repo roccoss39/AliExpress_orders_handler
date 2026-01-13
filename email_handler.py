@@ -173,6 +173,7 @@ class EmailHandler:
         # ====================================================================
         
         # Sprawdź czy listy są puste (lub nie istnieją)
+        user_data = self.user_mappings.get(user_key, {}) # Zabezpieczenie
         pkgs = user_data.get("package_numbers", [])
         ords = user_data.get("order_numbers", [])
         
@@ -181,14 +182,18 @@ class EmailHandler:
         
         if has_no_packages and has_no_orders:
             # Jeśli user jest pusty, usuwamy go CAŁKOWICIE
-            del self.user_mappings[user_key]
-            logging.info(f"❌ Usunięto całkowicie wpis użytkownika {user_key} (brak aktywnych zamówień).")
-            self._save_mappings()
-            return # Koniec, user usunięty
+            if user_key in self.user_mappings:
+                del self.user_mappings[user_key]
+                logging.info(f"❌ Usunięto całkowicie wpis użytkownika {user_key} (brak aktywnych zamówień).")
+                self._save_mappings()
+                
+                return True  # 👈👈👈 TO JEST NAJWAŻNIEJSZE! MUSI TU BYĆ!
 
-        # Jeśli user został, ale coś zmieniliśmy w środku (np. usunęliśmy jedną z dwóch paczek)
+        # Jeśli user został, ale coś zmieniliśmy
         if changed:
             self._save_mappings()
+            
+        return False # 👈 Dla porządku dodaj też to na samym końcu
 
     def fetch_new_emails(self, email_configs_override=None):
         """
