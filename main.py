@@ -842,6 +842,7 @@ def show_diagnostic_menu():
 
 # Na końcu main.py
 def run_reprocess(target_email, limit=None):
+    #np. python3 main.py --reprocess-email znowu.ja1@interia.pl --limit 5
     logging.info(f"🛠️ URUCHAMIAM TRYB REPROCESS DLA: {target_email}")
     if limit:
         logging.info(f"🔢 Cel: Przetworzyć {limit} zamówień (zaczynając od najstarszych)")

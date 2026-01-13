@@ -461,14 +461,16 @@ class SheetsHandler:
             return False
 
     def _direct_create_row(self, order_data):
-        """Bezpośrednie tworzenie wiersza z obsługą WSZYSTKICH kolumn"""
+        """Bezpośrednie tworzenie wiersza z obsługą WSZYSTKICH kolumn + Auto-archiwizacja"""
         try:
+            # 1. Znajdź pierwszy wolny wiersz
             emails = self.worksheet.col_values(1)
             first_empty_row = len(emails) + 1
             if first_empty_row < 2: first_empty_row = 2
 
             logging.info(f"Tworzę nowy wiersz awaryjnie w pozycji {first_empty_row}")
             
+            # 2. Przygotuj dane
             row_data = [""] * 15
             row_data[0] = order_data.get('email', '') or ""
             row_data[1] = order_data.get('product_name', '') or ""
@@ -501,14 +503,15 @@ class SheetsHandler:
             if pkg: 
                 row_data[14] = f"'{pkg}"
 
+            # 3. Zapisz do arkusza
             range_name = f"A{first_empty_row}:O{first_empty_row}"
             self.worksheet.update(range_name=range_name, values=[row_data])
             
             logging.info(f"Utworzono awaryjnie wiersz {first_empty_row}")
+
+            # 4. Kolorowanie (Twój istniejący kod)
             try:
-                carrier_name = order_data.get('carrier', 'Unknown')
                 carrier = self.carriers.get(carrier_name)
-                
                 if not carrier: 
                      from carriers_sheet_handlers import BaseCarrier
                      carrier = BaseCarrier(self)
@@ -523,10 +526,31 @@ class SheetsHandler:
             except Exception as e:
                 logging.warning(f"⚠️ Nie udało się pokolorować wiersza {first_empty_row}: {e}")
 
+            # =================================================================
+            # 5. ✅ NOWE: AUTOMATYCZNA ARCHIWIZACJA JEŚLI DOSTARCZONA
+            # =================================================================
+            if status_key == "delivered":
+                logging.info(f"📦 Nowy wiersz ma status 'delivered'. Przenoszę natychmiast do archiwum...")
+                
+                # Przenieś do zakładki Delivered
+                self.move_to_delivered(first_empty_row, row_data)
+                
+                # Spróbuj wyczyścić mapowanie (jeśli masz podpięty email_handler w SheetsHandler)
+                if hasattr(self, 'email_handler') and self.email_handler:
+                    self.email_handler.remove_user_mapping(
+                        order_data.get("user_key"),
+                        order_data.get("package_number"),
+                        order_data.get("order_number")
+                    )
+                    logging.info("🧹 Wyczyszczono mapowanie po natychmiastowej archiwizacji.")
+            # =================================================================
+
             return True
             
         except Exception as e:
             logging.error(f"Błąd _direct_create_row: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def load_user_mappings_from_sheets(self):
