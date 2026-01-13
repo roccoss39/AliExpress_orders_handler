@@ -260,6 +260,7 @@ class InPostDataHandler(BaseDataHandler):
             "inpost",
             "paczkomat",
             "appkomat",
+            "InPost - Potwierdzenie nadania przesyłki",
             "paczka już na ciebie czeka",
             "paczka została odebrana",
             "paczka odebrana",
@@ -305,7 +306,7 @@ class InPostDataHandler(BaseDataHandler):
         elif "czeka na odbiór" in subject_lower or "w paczkomacie" in subject_lower or "kod odbioru" in body_lower:
             # Tylko jeśli wyraźnie czeka w paczkomacie
             status = "pickup"
-        elif "utworzenia paczki" in subject_lower or "przygotowana" in subject_lower or "nadana" in subject_lower:
+        elif "utworzenia paczki" in subject_lower or "przygotowana" in subject_lower or "nadana" in subject_lower or "nadania" in subject_lower:
             # ✅ POPRAWKA: Utworzenie to dopiero początek (shipment_sent)
             status = "shipment_sent"
         elif "kurier odebrał" in subject_lower or "w trasie" in subject_lower or "w drodze" in subject_lower:

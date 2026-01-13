@@ -920,8 +920,8 @@ class EmailHandler:
         
     def fetch_specific_account_history(self, target_email, days_back=30):
         """
-        Pobiera historię maili dla konkretnego konta (ignorując status przeczytania).
-        Zwraca maile posortowane OD NAJSTARSZEGO.
+        Pobiera historię maili dla konkretnego konta.
+        Jeśli nie znajdzie configu, używa danych domyślnych (FALLBACK).
         """
         import config
         from datetime import datetime, timedelta
@@ -930,16 +930,31 @@ class EmailHandler:
         target_email = target_email.strip().lower()
         all_emails = []
         
-        # 1. Znajdź konfigurację dla podanego maila w configu
+        # 1. Próba znalezienia dedykowanej konfiguracji w config.py
         found_config = None
-        for cfg in config.ALL_EMAIL_CONFIGS:
-            if cfg['email'].strip().lower() == target_email:
-                found_config = cfg
-                break
+        if hasattr(config, 'ALL_EMAIL_CONFIGS'):
+            for cfg in config.ALL_EMAIL_CONFIGS:
+                if cfg['email'].strip().lower() == target_email:
+                    found_config = cfg
+                    break
         
+        # --- SEKCJA FALLBACK (To dodałem) ---
         if not found_config:
-            logging.error(f"❌ Nie znaleziono konfiguracji dla {target_email} w config.py")
-            return []
+            logging.warning(f"⚠️ Nie znaleziono jawnej konfiguracji dla {target_email} w config.py")
+            
+            # Sprawdzamy czy istnieje hasło domyślne
+            if hasattr(config, 'DEFAULT_EMAIL_PASSWORD') and config.DEFAULT_EMAIL_PASSWORD:
+                logging.info(f"🔧 Uruchamiam FALLBACK: Używam domyślnego hasła i serwera Interia.")
+                found_config = {
+                    'email': target_email,
+                    'password': config.DEFAULT_EMAIL_PASSWORD, # Tu bierze hasło z configu
+                    'server': 'poczta.interia.pl',             # Domyślny serwer Interii
+                    'source': 'interia'                        # Domyślne źródło
+                }
+            else:
+                logging.error(f"❌ Brak konfiguracji ORAZ brak 'DEFAULT_EMAIL_PASSWORD' w config.py dla {target_email}")
+                return []
+        # ------------------------------------
 
         # 2. Oblicz datę wstecz
         cutoff_date = datetime.now() - timedelta(days=days_back)
@@ -948,6 +963,7 @@ class EmailHandler:
         source = found_config.get('source', 'unknown')
         logging.info(f"🔄 REPROCESS: Łączenie z {target_email} ({source})...")
         
+        # 3. Logowanie (użyje znalezionego configu LUB tego stworzonego w fallbacku)
         client = self.connect_to_email_account(found_config)
         if not client:
             return []
@@ -955,7 +971,7 @@ class EmailHandler:
         try:
             client.select("INBOX")
             
-            # ✅ SZUKAJ WSZYSTKICH MAILI OD DATY (bez UNSEEN)
+            # Szukamy wiadomości od daty
             search_criteria = f'(SINCE "{date_string}")'
             logging.info(f"📅 Kryteria reprocess: {search_criteria}")
             
@@ -963,13 +979,12 @@ class EmailHandler:
             
             if status == "OK" and messages[0]:
                 msg_ids = messages[0].split()
-                logging.info(f"📧 Znaleziono łącznie {len(msg_ids)} wiadomości z ostatnich {days_back} dni.")
+                logging.info(f"📧 Znaleziono łącznie {len(msg_ids)} wiadomości.")
                 
-                # ✅ WAŻNE: Sortuj od NAJSTARSZYCH (rosnąco), aby odtwarzać historię chronologicznie
+                # Sortowanie od najstarszych
                 msg_ids.sort(key=lambda x: int(x.decode()), reverse=False)
                 
                 for num in msg_ids:
-                    # Pobierz nagłówki i treść
                     res, msg_data = client.fetch(num, "(RFC822)")
                     if res == "OK":
                         raw_email = msg_data[0][1]
@@ -983,7 +998,7 @@ class EmailHandler:
                         
                         all_emails.append((source, msg))
             else:
-                logging.warning("📭 Nie znaleziono żadnych wiadomości w zadanym okresie.")
+                logging.warning("📭 Nie znaleziono wiadomości w tym okresie.")
 
         except Exception as e:
             logging.error(f"❌ Błąd podczas pobierania historii: {e}")

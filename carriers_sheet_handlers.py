@@ -8,6 +8,7 @@ class BaseCarrier:
     
     def __init__(self, sheets_handler):
         self.sheets_handler = sheets_handler
+        
         self.name = "Unknown"
         # Domyślne kolory (mogą być nadpisane w klasach potomnych)
         self.colors = {
@@ -216,6 +217,18 @@ class BaseCarrier:
                 self.update_shipment_sent(row, order_data)
             else:
                 self.general_update_sheet_data(row, order_data, order_data["status"])
+
+                if order_data["status"] == "delivered":
+                    if hasattr(self, 'email_handler') and self.email_handler:
+                        self.email_handler.remove_user_mapping(
+                            order_data.get("user_key"),
+                            order_data.get("package_number"),
+                            order_data.get("order_number")
+                        )
+                        logging.info(f"🧹 Wyczyszczono mapowanie po doręczeniu dla: {order_data.get('user_key')}")
+                    else:
+                        logging.warning("⚠️ Nie można wyczyścić mapowania: brak 'email_handler' w obiekcie Carrier")
+
         else:
             # Nie znaleziono wiersza - utwórz nowy
             if order_data["status"] in ["shipment_sent", "transit", "confirmed"]:
@@ -233,7 +246,7 @@ class InPostCarrier(BaseCarrier):
         # INPOST - NIEBIESKIE ODCIENIE
         self.colors = {
             "shipment_sent": {"red": 0.8, "green": 0.9, "blue": 1.0},   # Jasny niebieski - nadano
-            "pickup": {"red": 0.1, "green": 0.1, "blue": 0.5},          # Ciemny niebieski - gotowe do odbioru
+            "pickup": {"red": 0.5, "green": 0.5, "blue": 1.0},          # Ciemny niebieski - gotowe do odbioru
             "delivered": {"red": 0.5, "green": 0.9, "blue": 0.8}        # Turkusowy - dostarczone
         }
     

@@ -15,7 +15,7 @@ EMAIL_TRACKING_MODE = 'ACCOUNTS'
 # False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
 PROCESS_READ_EMAILS = True # Huge API calls
 
-USE_OPENAI_API = True # Only regrex
+USE_OPENAI_API = False # Only regrex
 
 # Ustawienia kont e-mail
 GMAIL_EMAIL = os.getenv('GMAIL_EMAIL_1')

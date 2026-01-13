@@ -98,6 +98,8 @@ def main_loop():
 
     first_run = True
 
+    logging.info("--- Uruchamianie procedury czyszczenia zakończonych zamówień ---")
+    sheets_handler.check_and_archive_delivered_orders()
 
     while True:
         # ✅ SPRAWDŹ CZY ZAŻĄDANO ZAMKNIĘCIA
@@ -852,7 +854,7 @@ def run_reprocess(target_email, limit=None):
         return
 
     # 1. Pobierz WSZYSTKIE maile z okresu (bez limitu tutaj)
-    emails = email_handler.fetch_specific_account_history(target_email, days_back=30)
+    emails = email_handler.fetch_specific_account_history(target_email, days_back=60)
     
     if not emails:
         logging.warning("Brak maili do przetworzenia.")
