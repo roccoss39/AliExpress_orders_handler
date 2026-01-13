@@ -19,7 +19,7 @@ accounts = [
         'name': 'Interia',
         'imap_server': 'poczta.interia.pl',  # POPRAWIONY SERWER
         'email': 'styczenq@interia.pl',
-        'password': 'Qweqweqweqwe1$',
+        'password': '....',
         'port': 993
     },
     {

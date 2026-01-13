@@ -448,22 +448,19 @@ class EmailHandler:
         mode = getattr(config, 'EMAIL_TRACKING_MODE', 'CONFIG')
 
         if mode == 'ACCOUNTS' and sheets_handler:
-            logging.info("🔄 Tryb pracy: ACCOUNTS (Pobieranie listy z arkusza)")
+            logging.info("🔄 Tryb pracy: ACCOUNTS (Pobieranie emaili z arkusza Google Sheets)")
             
-            # Pobierz listę maili z arkusza
+            # ✅ NOWA FUNKCJA - zwraca pełne konfiguracje z hasłami
             from carriers_sheet_handlers import EmailAvailabilityManager
             email_manager = EmailAvailabilityManager(sheets_handler)
-            allowed_emails = email_manager.get_emails_from_accounts_sheet()
+            email_configs = email_manager.get_emails_from_accounts_sheet()
             
-            if allowed_emails:
-                # Filtruj: bierzemy z configu tylko te, które są w arkuszu
-                for cfg in all_configs:
-                    if cfg['email'].strip().lower() in allowed_emails:
-                        configs_to_check.append(cfg)
-                
-                logging.info(f"✅ Wybrano {len(configs_to_check)} kont do sprawdzenia (na podstawie Arkusza)")
+            if email_configs:
+                # Używamy bezpośrednio konfiguracji z Accounts (zawierają hasła!)
+                configs_to_check = email_configs
+                logging.info(f"✅ Wybrano {len(configs_to_check)} kont do sprawdzenia (z Accounts)")
             else:
-                logging.warning("⚠️ Arkusz Accounts jest pusty lub niedostępny. Sprawdzam wszystkie z configu.")
+                logging.warning("⚠️ Arkusz Accounts jest pusty lub niedostępny. Fallback do CONFIG.")
                 configs_to_check = all_configs
         else:
             # Stary tryb lub brak handlera arkusza

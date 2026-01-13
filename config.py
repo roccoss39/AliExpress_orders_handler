@@ -15,7 +15,7 @@ EMAIL_TRACKING_MODE = 'ACCOUNTS'
 # False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
 PROCESS_READ_EMAILS = True # Huge API calls
 
-USE_OPENAI_API = False # Only regrex
+USE_OPENAI_API = True # Only regrex
 
 # Ustawienia kont e-mail
 GMAIL_EMAIL = os.getenv('GMAIL_EMAIL_1')
@@ -29,6 +29,8 @@ SHEET_NAME = "Ali_orders"
 
 # Adres do powiadomień
 NOTIFICATION_EMAIL = os.getenv('NOTIFICATION_EMAIL')
+
+DEFAULT_EMAIL_PASSWORD = INTERIA_PASSWORD 
 
 # Interwał sprawdzania (w minutach)
 CHECK_INTERVAL = 1

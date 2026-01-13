@@ -534,6 +534,33 @@ class SheetsHandler:
             self.worksheet.update(range_name=range_name, values=[row_data])
             
             logging.info(f"Utworzono awaryjnie wiersz {first_empty_row}: Order={order_num}, Paczka={pkg}")
+            try:
+                # Pobierz obiekt przewoźnika, żeby znać jego kolory
+                carrier_name = order_data.get('carrier', 'Unknown')
+                carrier = self.carriers.get(carrier_name)
+                
+                # Jeśli nie ma przewoźnika, użyj domyślnego
+                if not carrier: 
+                     # Tymczasowa instancja BaseCarrier, żeby dostać domyślne kolory
+                     from carriers_sheet_handlers import BaseCarrier
+                     carrier = BaseCarrier(self)
+
+                # Pobierz klucz statusu (np. 'shipment_sent')
+                status_key = order_data.get('status', 'unknown')
+                
+                # Pobierz kolor z mapy kolorów przewoźnika
+                color = carrier.colors.get(status_key, carrier.colors.get('unknown'))
+                
+                if color:
+                    # Nałóż kolor na zakres A:O
+                    self.worksheet.format(f"A{first_empty_row}:O{first_empty_row}", {
+                        "backgroundColor": color,
+                        "textFormat": {"foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0}}
+                    })
+                    logging.info(f"🎨 Pomalowano wiersz {first_empty_row} na kolor statusu {status_key}")
+            except Exception as e:
+                logging.warning(f"⚠️ Nie udało się pokolorować wiersza {first_empty_row}: {e}")
+
             return True
             
         except Exception as e:
@@ -676,6 +703,21 @@ class SheetsHandler:
                 
         except Exception as e:
             logging.error(f"Błąd podczas aktualizacji paczki w transporcie: {e}")
+            return False
+        
+    def move_row_to_delivered(self, row_number, order_data=None):
+        """
+        Deleguje przeniesienie wiersza do DeliveredOrdersManager.
+        Naprawia błąd: 'SheetsHandler' object has no attribute 'move_row_to_delivered'
+        """
+        try:
+            # Import wewnątrz funkcji, aby uniknąć błędów cyklicznych (circular import)
+            from carriers_sheet_handlers import DeliveredOrdersManager
+            
+            manager = DeliveredOrdersManager(self)
+            return manager.move_delivered_order(row_number)
+        except Exception as e:
+            logging.error(f"❌ Błąd w move_row_to_delivered: {e}")
             return False
 
 

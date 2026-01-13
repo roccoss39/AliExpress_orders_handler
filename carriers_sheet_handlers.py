@@ -1210,8 +1210,16 @@ class EmailAvailabilityManager:
 
     def get_emails_from_accounts_sheet(self):
         """
-        Pobiera listę emaili z kolumny A w zakładce Accounts.
-        Zwraca listę stringów (samych adresów).
+        Pobiera listę emaili z zakładki Accounts wraz z hasłami.
+        Zwraca listę słowników z pełną konfiguracją.
+        
+        Returns:
+            list: [{
+                'email': 'test@interia.pl',
+                'password': '...',
+                'source': 'interia',
+                'status': 'active'
+            }, ...]
         """
         if not self.worksheet:
             self._init_accounts_worksheet()
@@ -1219,13 +1227,90 @@ class EmailAvailabilityManager:
                 return []
             
         try:
-            email_column = self.worksheet.col_values(1)
-            # Pomiń nagłówek i puste wiersze
-            emails = [email.strip().lower() for email in email_column[1:] if email.strip()]
-            logging.info(f"📋 Wczytano {len(emails)} aktywnych kont z zakładki Accounts")
-            return emails
+            import config
+            
+            # Pobierz wszystkie dane z arkusza
+            accounts_data = self.worksheet.get_all_values()
+            
+            if len(accounts_data) <= 1:
+                logging.warning("⚠️ Zakładka Accounts jest pusta (tylko nagłówek)")
+                return []
+            
+            email_configs = []
+            
+            # Struktura: A=Email, B=Status, C=Password, D=Source
+            for i, row in enumerate(accounts_data[1:], start=2):
+                try:
+                    if len(row) < 1:
+                        continue
+                    
+                    email = row[0].strip() if row[0] else ""
+                    if not email:
+                        continue
+                    
+                    # Status (kolumna B)
+                    status = row[1].strip().lower() if len(row) > 1 and row[1] else "active"
+                    
+                    # Pomijaj nieaktywne
+                    if status in ['inactive', 'delivered', 'stopped', 'paused']:
+                        logging.info(f"⏭️ Email {email} ma status '{status}' - pomijam")
+                        continue
+                    
+                    # Hasło (kolumna C)
+                    password = row[2].strip() if len(row) > 2 and row[2] else ""
+                    
+                    # Źródło (kolumna D)
+                    source = row[3].strip().lower() if len(row) > 3 and row[3] else ""
+                    
+                    # ✅ AUTO-DETEKCJA ŹRÓDŁA
+                    if not source:
+                        if '@gmail.com' in email.lower():
+                            source = 'gmail'
+                        elif '@interia.pl' in email.lower():
+                            source = 'interia'
+                        elif '@o2.pl' in email.lower():
+                            source = 'o2'
+                        else:
+                            logging.warning(f"⚠️ Nie można określić źródła dla {email}, używam 'gmail'")
+                            source = 'gmail'
+                        logging.info(f"🔍 Auto-wykryto źródło '{source}' dla {email}")
+                    
+                    # ✅ HASŁO - HIERARCHIA
+                    if not password:
+                        # 1. Sprawdź EMAIL_PASSWORDS_MAP
+                        if hasattr(config, 'EMAIL_PASSWORDS_MAP') and email in config.EMAIL_PASSWORDS_MAP:
+                            password = config.EMAIL_PASSWORDS_MAP[email]
+                            logging.debug(f"🔑 Znaleziono hasło dla {email} w EMAIL_PASSWORDS_MAP")
+                        # 2. Użyj DEFAULT_EMAIL_PASSWORD
+                        elif hasattr(config, 'DEFAULT_EMAIL_PASSWORD') and config.DEFAULT_EMAIL_PASSWORD:
+                            password = config.DEFAULT_EMAIL_PASSWORD
+                            logging.info(f"🔑 Używam domyślnego hasła dla {email}")
+                        else:
+                            logging.warning(f"⚠️ Brak hasła dla {email} - pomijam")
+                            continue
+                    
+                    # Dodaj do listy
+                    email_config = {
+                        'email': email,
+                        'password': password,
+                        'source': source,
+                        'status': status
+                    }
+                    
+                    email_configs.append(email_config)
+                    logging.info(f"✅ Dodano email do śledzenia: {email} (źródło: {source}, status: {status})")
+                    
+                except Exception as e:
+                    logging.error(f"❌ Błąd przetwarzania wiersza {i}: {e}")
+                    continue
+            
+            logging.info(f"📧 Znaleziono {len(email_configs)} aktywnych emaili do śledzenia w Accounts")
+            return email_configs
+            
         except Exception as e:
-            logging.error(f"Błąd pobierania emaili z Accounts: {e}")
+            logging.error(f"❌ Błąd pobierania emaili z Accounts: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             return []
 
     def check_email_availability(self):
