@@ -1327,6 +1327,85 @@ class EmailAvailabilityManager:
             return []
 
     # W pliku carriers_sheet_handlers.py wewnątrz klasy EmailAvailabilityManager
+    def check_email_availability(self):
+        """
+        Sprawdza plik user_mappings.json i aktualizuje statusy oraz kolory w arkuszu Accounts.
+        Używa CZYSTEGO gspread (bez gspread-formatting).
+        """
+        import json
+        import os
+        
+        logging.info("🎨 Aktualizacja kolorów i statusów w arkuszu Accounts...")
+
+        # 1. Wczytaj aktualne mapowania (kto jest zajęty)
+        active_emails = []
+        mappings_file = "user_mappings.json"
+        
+        if os.path.exists(mappings_file):
+            try:
+                with open(mappings_file, 'r', encoding='utf-8') as f:
+                    mappings = json.load(f)
+                    for key in mappings.keys():
+                        active_emails.append(key.lower())
+            except Exception as e:
+                logging.error(f"Błąd odczytu mapowań: {e}")
+
+        try:
+            # 2. Pobierz arkusz
+            if hasattr(self.sheets_handler, 'worksheet'):
+                sheet = self.sheets_handler.worksheet.spreadsheet.worksheet("Accounts")
+            else:
+                sheet = self.sheets_handler.workbook.worksheet("Accounts")
+
+            # 3. Pobierz wszystkie dane
+            all_values = sheet.get_all_values()
+            
+            # Definicje kolorów (zwykłe słowniki)
+            red_format = {
+                "backgroundColor": {"red": 1.0, "green": 0.8, "blue": 0.8}
+            }
+            white_format = {
+                "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}
+            }
+            
+            # Pomijamy nagłówek (start od indeksu 1 -> wiersz 2)
+            for i, row in enumerate(all_values[1:], start=2):
+                if not row: continue
+                
+                email_in_sheet = str(row[0]).strip().lower()
+                login_part = email_in_sheet.split('@')[0]
+                
+                is_active = (email_in_sheet in active_emails) or (login_part in active_emails)
+                
+                current_status = row[1] if len(row) > 1 else ""
+                
+                if is_active:
+                    # Jeśli zajęty, a status jest inny niż "-", zaktualizuj tekst
+                    if current_status != "-":
+                        sheet.update_cell(i, 2, "-")
+                    
+                    # ✅ Używamy natywnej metody .format() z gspread
+                    # To może chwilę potrwać przy wielu kontach, ale jest bezpieczne
+                    try:
+                        sheet.format(f"A{i}:C{i}", red_format)
+                    except Exception:
+                        pass # Ignoruj błędy formatowania, to tylko kosmetyka
+
+                else:
+                    # Jeśli wolny, a status jest inny niż "wolny", zaktualizuj tekst
+                    if current_status != "wolny":
+                        sheet.update_cell(i, 2, "wolny")
+                    
+                    # ✅ Kolorowanie na biało
+                    try:
+                        sheet.format(f"A{i}:C{i}", white_format)
+                    except Exception:
+                        pass
+
+            logging.info("✅ Zakończono aktualizację statusów w Accounts.")
+
+        except Exception as e:
+            logging.error(f"❌ Błąd w check_email_availability: {e}")
 
     def free_up_account(self, email):
         """
