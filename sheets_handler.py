@@ -533,7 +533,7 @@ class SheetsHandler:
                 logging.info(f"📦 Nowy wiersz ma status 'delivered'. Przenoszę natychmiast do archiwum...")
                 
                 # Przenieś do zakładki Delivered
-                self.move_to_delivered(first_empty_row, row_data)
+                self.move_row_to_delivered(first_empty_row, row_data)
                 
                 # Spróbuj wyczyścić mapowanie (jeśli masz podpięty email_handler w SheetsHandler)
                 if hasattr(self, 'email_handler') and self.email_handler:

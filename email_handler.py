@@ -140,7 +140,7 @@ class EmailHandler:
     def fetch_new_emails(self, email_configs_override=None):
         """
         Pobieranie e-maili z ostatnich X dni.
-        Obsługuje tryb PROCESS_READ_EMAILS (czytanie przeczytanych).
+        Obsługuje logikę mieszaną: PROCESS_READ_EMAILS oraz CHECK_ONLY_UNSEEN.
         """
         all_emails = []
         
@@ -148,18 +148,31 @@ class EmailHandler:
         configs = email_configs_override if email_configs_override is not None else config.ALL_EMAIL_CONFIGS
 
         # ✅ UŻYJ KONFIGURACJI Z config.py
-        from config import EMAIL_CHECK_SETTINGS
-        import config as app_config  # Import configu aplikacji
+        import config as app_config
         
-        days_back = EMAIL_CHECK_SETTINGS.get('days_back', 14)
-        max_emails = EMAIL_CHECK_SETTINGS.get('max_emails_per_account', 100)
-        mark_as_read = EMAIL_CHECK_SETTINGS.get('mark_as_read', True)
+        # Pobieranie ustawień
+        days_back = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('days_back', 14)
+        max_emails = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('max_emails_per_account', 100)
+        mark_as_read = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('mark_as_read', True)
         
-        # ✅ SPRAWDŹ CZY CZYTAĆ PRZECZYTANE
-        process_read = getattr(app_config, 'PROCESS_READ_EMAILS', False)
+        # ====================================================================
+        # ✅ LOGIKA FLAG (PROCESS_READ_EMAILS vs CHECK_ONLY_UNSEEN)
+        # ====================================================================
+        process_read_forced = getattr(app_config, 'PROCESS_READ_EMAILS', False)
+        check_only_unseen_cfg = getattr(app_config, 'CHECK_ONLY_UNSEEN', True)
         
-        if process_read:
-            logging.warning("⚠️ TRYB TESTOWY: Pobieranie również PRZECZYTANYCH wiadomości!")
+        # Decyzja: Czy szukamy tylko nieprzeczytanych?
+        # Szukamy tylko UNSEEN, jeśli nie ma wymuszenia (process_read) I włączona jest opcja unseen
+        search_only_unseen = (not process_read_forced) and check_only_unseen_cfg
+        
+        # Logowanie trybu
+        if process_read_forced:
+            logging.warning("⚠️ TRYB PROCESS_READ_EMAILS: Pobieranie WSZYSTKICH wiadomości (wymuszenie)!")
+        elif check_only_unseen_cfg:
+            logging.info("🕵️ Tryb skanowania: Tylko NIEPRZECZYTANE (szybki)")
+        else:
+            logging.info("🕵️ Tryb skanowania: WSZYSTKIE (również otwarte) - to może potrwać dłużej")
+        # ====================================================================
         
         # ✅ OBLICZ DATĘ GRANICZNĄ (X DNI WSTECZ)
         from datetime import datetime, timedelta
@@ -189,13 +202,20 @@ class EmailHandler:
                 client.select("INBOX")
                 
                 # ✅ BUDOWANIE KRYTERIÓW WYSZUKIWANIA
-                # Jeśli PROCESS_READ_EMAILS=True, usuwamy 'UNSEEN' z zapytania
-                criteria_prefix = "" if process_read else "UNSEEN "
+                criteria_parts = [f'(SINCE "{date_string}")']
                 
+                if search_only_unseen:
+                    criteria_parts.append('(UNSEEN)')
+                
+                # Sklejamy w jeden string, np: (UNSEEN SINCE "14-Dec-2025")
+                search_criteria = " ".join(criteria_parts)
+                if len(criteria_parts) > 1:
+                    search_criteria = f"({search_criteria})"
+                
+                logging.info(f"📅 {source} Criteria: {search_criteria}")
+
+                # --- Obsługa specyficzna dla O2 ---
                 if source.lower() == 'o2':
-                    search_criteria = f'({criteria_prefix}SINCE "{date_string}")'
-                    logging.info(f"🔍 O2 Criteria: {search_criteria}")
-                    
                     status, messages = client.search(None, search_criteria)
                     
                     if status == "OK" and messages[0]:
@@ -214,9 +234,8 @@ class EmailHandler:
                     else:
                         messages = [b'']
                         status = "OK"
+                # --- Obsługa standardowa (Gmail, Interia) ---
                 else:
-                    search_criteria = f'({criteria_prefix}SINCE "{date_string}")'
-                    logging.info(f"📅 {source} Criteria: {search_criteria}")
                     status, messages = client.search(None, search_criteria)
                 
                 # ✅ PRZETWARZANIE WYNIKÓW
@@ -235,6 +254,7 @@ class EmailHandler:
                     messages_to_process.sort(key=lambda x: int(x.decode()), reverse=True)
                     
                     for num in messages_to_process:
+                        # Pobieramy nagłówki (RFC822)
                         status, msg_data = client.fetch(num, "(RFC822)")
                         if status == "OK":
                             raw_email = msg_data[0][1]
@@ -261,14 +281,21 @@ class EmailHandler:
                                 email_dt = datetime.strptime(email_date, '%Y-%m-%d %H:%M:%S')
                                 if email_dt < cutoff_date:
                                     logging.info(f"⏭️ Email z {email_date} starszy niż {days_back} dni - pomijam")
-                                    if not process_read: # Oznaczamy stare jako przeczytane tylko w trybie normalnym
+                                    # W trybie "tylko nieprzeczytane", jeśli trafimy na stary nieprzeczytany,
+                                    # warto go oznaczyć jako przeczytany, żeby nie wracał.
+                                    if search_only_unseen:
                                         emails_to_mark_read.append(num)
                                     continue
 
                             all_emails.append((source, email_message))
                             
-                            # W trybie normalnym oznaczamy jako przeczytane
-                            if not process_read:
+                            # Jeśli jesteśmy w trybie "tylko nieprzeczytane", dodajemy do listy do "odfajkowania"
+                            # W trybie pełnego skanu (search_only_unseen=False) zazwyczaj NIE chcemy
+                            # oznaczać wszystkich starych maili jako przeczytane, chyba że to wymusimy.
+                            if search_only_unseen:
+                                emails_to_mark_read.append(num)
+                            elif process_read_forced and mark_as_read:
+                                # Jeśli wymusiliśmy process_read, to oznaczamy
                                 emails_to_mark_read.append(num)
                 else:
                     logging.info(f"📭 Brak emaili spełniających kryteria w {source}")
@@ -278,8 +305,7 @@ class EmailHandler:
                 emails_to_mark_read = []
                     
             finally:
-                # Oznaczaj jako przeczytane TYLKO jeśli nie jesteśmy w trybie "czytaj wszystko"
-                # lub jeśli chcesz, żeby po odczytaniu zniknęły z "nieprzeczytanych" na przyszłość
+                # Oznaczaj jako przeczytane
                 if mark_as_read and emails_to_mark_read:
                     try:
                         logging.info(f"📖 Oznaczanie {len(emails_to_mark_read)} emaili jako przeczytane w {source}")
@@ -288,7 +314,7 @@ class EmailHandler:
                                 client.store(num, '+FLAGS', '\\Seen')
                             except:
                                 pass
-                        client.expunge()
+                        client.expunge() # Zatwierdź zmiany na serwerze
                     except Exception as e:
                         logging.error(f"❌ Błąd oznaczania emaili: {e}")
                 

@@ -10,12 +10,16 @@ load_dotenv(override=True)
 # 'ACCOUNTS' - sprawdza tylko maile wpisane w zakładce "Accounts" w Google Sheets
 EMAIL_TRACKING_MODE = 'ACCOUNTS'
 
+# True  = Sprawdza tylko te z "kropką" (UNSEEN). Szybkie, oszczędne.
+# False = Sprawdza WSZYSTKIE maile z zakresu dat (nawet te otwarte). Wolniejsze, ale pewniejsze.
+CHECK_ONLY_UNSEEN = False
+
 # Czy przetwarzać również przeczytane maile?
 # True = Pobiera wszystko z ostatnich dni (UWAGA: zużywa więcej tokenów AI)
 # False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
 PROCESS_READ_EMAILS = False # Huge API calls
 
-USE_OPENAI_API = True # Only regrex
+USE_OPENAI_API = False # Only regrex
 
 # Ustawienia kont e-mail
 GMAIL_EMAIL = os.getenv('GMAIL_EMAIL_1')
