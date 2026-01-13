@@ -137,6 +137,59 @@ class EmailHandler:
             logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> paczka {package_number}")
             self._save_mappings()
     
+    def remove_user_mapping(self, user_key, package_number=None, order_number=None):
+        """
+        Usuwa zakończone zamówienie. Jeśli brak aktywnych zamówień -> usuwa całego usera.
+        Wersja ulepszona: sprawdza pustość nawet jeśli nie znaleziono konkretnej paczki.
+        """
+        if not user_key:
+            return
+
+        user_key = user_key.lower().strip()
+        
+        if user_key not in self.user_mappings:
+            return
+
+        user_data = self.user_mappings[user_key]
+        changed = False
+        
+        # 1. Usuwanie numeru paczki
+        if package_number:
+            if "package_numbers" in user_data and package_number in user_data["package_numbers"]:
+                user_data["package_numbers"].remove(package_number)
+                logging.info(f"🗑️ Usunięto paczkę {package_number} z mapowania {user_key}")
+                changed = True
+
+        # 2. Usuwanie numeru zamówienia
+        if order_number:
+            order_str = str(order_number)
+            if "order_numbers" in user_data and order_str in user_data["order_numbers"]:
+                user_data["order_numbers"].remove(order_str)
+                logging.info(f"🗑️ Usunięto zamówienie {order_number} z mapowania {user_key}")
+                changed = True
+
+        # ====================================================================
+        # 3. SPRAWDZANIE PUSTOŚCI (ZAWSZE)
+        # ====================================================================
+        
+        # Sprawdź czy listy są puste (lub nie istnieją)
+        pkgs = user_data.get("package_numbers", [])
+        ords = user_data.get("order_numbers", [])
+        
+        has_no_packages = len(pkgs) == 0
+        has_no_orders = len(ords) == 0
+        
+        if has_no_packages and has_no_orders:
+            # Jeśli user jest pusty, usuwamy go CAŁKOWICIE
+            del self.user_mappings[user_key]
+            logging.info(f"❌ Usunięto całkowicie wpis użytkownika {user_key} (brak aktywnych zamówień).")
+            self._save_mappings()
+            return # Koniec, user usunięty
+
+        # Jeśli user został, ale coś zmieniliśmy w środku (np. usunęliśmy jedną z dwóch paczek)
+        if changed:
+            self._save_mappings()
+
     def fetch_new_emails(self, email_configs_override=None):
         """
         Pobieranie e-maili z ostatnich X dni.
@@ -607,7 +660,7 @@ class EmailHandler:
 
 
     def analyze_email(self, subject, body, recipient, email_source, recipient_name=None, email_message=None, email_date=None, force_process=False):
-        """Analiza treści e-maila z uwzględnieniem daty i przełącznika AI/Regex"""
+        """Analiza treści e-maila z priorytetem dla AI jeśli włączone"""
         
         # Podstawowe dane dla każdego maila
         data = {
@@ -636,20 +689,18 @@ class EmailHandler:
         }
         
         import config
+        use_ai = getattr(config, 'USE_OPENAI_API', False) 
         
         # Sprawdź wszystkie handlery
         for handler in self.data_handlers:
             if handler.can_handle(subject, body):
                 logging.info(f"Wykryto email obsługiwany przez {handler.name}")
                 
-                # --- LOGIKA SPRAWDZANIA DATY Z OBSŁUGĄ FORCE_PROCESS ---
-                if email_date and not force_process:  # <--- Sprawdzamy tylko jeśli NIE wymuszamy
+                # --- LOGIKA SPRAWDZANIA DATY ---
+                if email_date and not force_process:
                     user_key = recipient.split('@')[0].lower() if recipient and '@' in recipient else None
-                    
                     if user_key:
                         existing_email_date = self._get_user_last_email_date(user_key)
-                        logging.info(f"Sprawdzanie dat dla użytkownika {user_key}: nowy={email_date}, istniejący={existing_email_date}")
-                        
                         if not existing_email_date or self.should_update_based_on_date(email_date, existing_email_date):
                             logging.info(f"✅ Przetwarzam najnowszy email dla {user_key}")
                             self._update_user_last_email_date(user_key, email_date)
@@ -657,14 +708,35 @@ class EmailHandler:
                             logging.info(f"⏭️ Pomijam starszy email dla {user_key}")
                             return None
                 elif force_process:
-                     logging.info(f"⚠️ TRYB FORCE: Pomijam sprawdzanie daty dla {email_date}")
                      user_key = recipient.split('@')[0].lower() if recipient else None
                      if user_key:
                          self._update_user_last_email_date(user_key, email_date)
 
-                # 1. Szybkie sprawdzenie statusów specyficznych
+                # ============================================================
+                # 1. PRIORYTET: AI (Jeśli włączone w configu)
+                # ============================================================
+                if use_ai:
+                    logging.info(f"🤖 Uruchamiam analizę AI dla {handler.name} (Priorytet AI)...")
+                    try:
+                        openai_data = self.openai_handler.general_extract_carrier_notification_data(
+                            body, subject, handler.name, recipient
+                        )
+                        if openai_data:
+                            if not openai_data.get("carrier"):
+                                openai_data["carrier"] = handler.name
+                            logging.info("🤖 AI zwróciło dane - pomijam Regexy.")
+                            return {**data, **openai_data}
+                    except Exception as e:
+                        logging.error(f"❌ Błąd AI: {e}. Przełączam na tryb awaryjny (Regex).")
+                        # Jeśli AI padnie, kod pójdzie dalej do Regexów
+
+                # ============================================================
+                # 2. SZYBKI REGEX (Tylko statusy z tematu)
+                # Uruchamia się tylko gdy AI wyłączone lub AI zawiodło
+                # ============================================================
                 result = handler.parse_delivery_status(subject, recipient, body, handler.name)
                 if result:
+                    logging.info(f"⚡ Szybki Regex znalazł status: {result.get('status')}")
                     return {**data, **result}
                 
                 if handler.name == "AliExpress":
@@ -672,51 +744,19 @@ class EmailHandler:
                     if result:
                         return {**data, **result}
                 
-                if hasattr(handler, 'is_closed_order'):
-                    is_closed = handler.is_closed_order(subject)
-                    if is_closed:
-                        logging.info(f"Email zakwalifikowany jako zamknięte zamówienie przez {handler.name}")
-                        data["status"] = "closed"
-                        data["carrier"] = handler.name
-                        return {**data, **data} # Zwracamy data scalone
-
-                logging.info(f"EMAIL NIE ZAKWALIFIKOWANY JAKO ZAMKNIĘTE ZAMÓWIENIE PRZEZ {handler.name}")        
-
-                # 2. Decyzja: AI czy Regex?
-                openai_data = None
-                use_ai = getattr(config, 'USE_OPENAI_API', False) 
-
-                if use_ai:
-                    logging.info(f"🤖 Uruchamiam analizę AI dla {handler.name}...")
-                    try:
-                        openai_data = self.openai_handler.general_extract_carrier_notification_data(
-                            body, subject, handler.name, recipient
-                        )
-                    except Exception as e:
-                        logging.error(f"❌ Błąd AI: {e}. Przełączam na Regex.")
-                        openai_data = None
-                else:
-                    logging.info(f"⚡ Tryb Regex (AI wyłączone w config): Używam wzorców dla {handler.name}")
-
-                if openai_data:
-                    if not openai_data.get("carrier"):
-                        openai_data["carrier"] = handler.name
-                    return {**data, **openai_data}
-
-                # 3. Fallback / Regex
-                logging.info(f"🔍 Uruchamiam handler.process (Regex) dla {handler.name}")
-                # Przekazujemy email_message do handlera (jeśli handler to obsługuje)
+                # ============================================================
+                # 3. ZAAWANSOWANY REGEX (Pełna analiza treści)
+                # ============================================================
+                logging.info(f"🔍 Uruchamiam handler.process (Pełny Regex) dla {handler.name}")
                 try:
                     processed_data = handler.process(subject, body, recipient, email_source, recipient_name, email_message)
                 except TypeError:
-                    # Fallback dla starszych handlerów bez argumentu email_message
                     processed_data = handler.process(subject, body, recipient, email_source, recipient_name)
                 
                 if processed_data:
                     if not processed_data.get("carrier"):
                         processed_data["carrier"] = handler.name
-                    
-                    logging.info(f"✅ Dane wyciągnięte Regexpem: Status={processed_data.get('status')}, Paczka={processed_data.get('package_number')}")
+                    logging.info(f"✅ Dane wyciągnięte Regexpem")
                     return {**data, **processed_data}
     
         logging.info(f"Mail nie został zakwalifikowany do żadnej kategorii: {subject}")

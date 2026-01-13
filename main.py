@@ -239,7 +239,15 @@ def main_loop():
                                         logging.warning(f"Brak user_key dla przesyłki {package_number}")
                             else:
                                 logging.warning(f"Nieznany przewoźnik: {carrier_name}")
-            
+
+                if order_data.get("status") == "delivered":
+                        logging.info(f"🧹 Status 'delivered' wykryty w pętli głównej. Usuwam mapowanie dla {order_data.get('user_key')}...")
+                        email_handler.remove_user_mapping(
+                            order_data.get("user_key"),
+                            order_data.get("package_number"),
+                            order_data.get("order_number")
+                        )
+
             # ✅ SPRAWDZAJ MAILE TYLKO GDY BYŁY ZMIANY
             if len(processed_emails) > 0 or first_run:
                 limiters.wait_for("sheets_read")

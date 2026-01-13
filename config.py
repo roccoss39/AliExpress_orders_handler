@@ -19,7 +19,7 @@ CHECK_ONLY_UNSEEN = False
 # False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
 PROCESS_READ_EMAILS = False # Huge API calls
 
-USE_OPENAI_API = False # Only regrex
+USE_OPENAI_API = True # Only regrex
 
 # Ustawienia kont e-mail
 GMAIL_EMAIL = os.getenv('GMAIL_EMAIL_1')
