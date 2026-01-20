@@ -1,178 +1,38 @@
-# AliExpress Order Tracker
-
-Automatyczny system śledzenia zamówień z AliExpress poprzez analizę emaili i aktualizację arkusza Google Sheets.
-
-## 🚀 Funkcjonalności
-
-- **Automatyczne sprawdzanie emaili** z różnych dostawców (Gmail, Interia, O2)
-- **Analiza statusów zamówień** za pomocą AI (OpenAI GPT)
-- **Aktualizacja Google Sheets** z informacjami o zamówieniach
-- **Powiadomienia** o zmianach statusów
-- **Mapowanie użytkowników** do numerów zamówień i paczek
-- **Graceful shutdown** z zapisem stanu
-- **Rate limiting** dla API
-- **Automatyczne czyszczenie logów**
-
-## 📋 Wymagania
-
-- Python 3.7+
-- Konto Google z dostępem do Google Sheets API
-- Klucz API OpenAI
-- Konta email do monitorowania
-
-## 🔧 Instalacja
-
-1. **Sklonuj repozytorium:**
-```bash
-git clone <repository-url>
-cd aliexpress-tracker
-```
-
-2. **Zainstaluj zależności:**
-```bash
-pip install -r requirements.txt
-```
-
-3. **Skonfiguruj zmienne środowiskowe:**
-```bash
-cp .env.example .env
-```
-Edytuj plik `.env` i uzupełnij wszystkie wymagane dane.
-
-4. **Skonfiguruj Google Service Account:**
-```bash
-cp service_account.json.example service_account.json
-```
-Uzupełnij plik danymi z Google Cloud Console.
-
-## ⚙️ Konfiguracja
-
-### Google Sheets API
-
-1. Przejdź do [Google Cloud Console](https://console.cloud.google.com/)
-2. Utwórz nowy projekt lub wybierz istniejący
-3. Włącz Google Sheets API
-4. Utwórz Service Account i pobierz klucz JSON
-5. Skopiuj zawartość do `service_account.json`
-6. Udostępnij arkusz Google dla adresu email Service Account
-
-### OpenAI API
-
-1. Zarejestruj się na [OpenAI Platform](https://platform.openai.com/)
-2. Wygeneruj klucz API
-3. Dodaj klucz do pliku `.env`
-
-### Konta Email
-
-Skonfiguruj hasła aplikacji dla:
-- **Gmail**: Wygeneruj hasło aplikacji w ustawieniach Google
-- **Interia**: Użyj standardowego hasła
-- **O2**: Użyj standardowego hasła
-
-## 🚀 Uruchomienie
-
-### Tryb rozwojowy:
-```bash
-python main.py
-```
-
-### Menu diagnostyczne:
-```bash
-python main.py --menu
-```
-
-### Jako usługa systemowa:
-```bash
-chmod +x deploy.sh
-./deploy.sh
-```
-
-## 📁 Struktura projektu
-
-```
-├── main.py                    # Główny plik aplikacji
-├── config.py                  # Konfiguracja
-├── email_handler.py           # Obsługa emaili
-├── sheets_handler.py          # Obsługa Google Sheets
-├── openai_handler.py          # Integracja z OpenAI
-├── notification.py            # System powiadomień
-├── graceful_shutdown.py       # Graceful shutdown
-├── rate_limiter.py           # Rate limiting
-├── requirements.txt          # Zależności Python
-├── .env.example              # Przykład zmiennych środowiskowych
-├── service_account.json.example # Przykład konfiguracji Google
-└── deploy.sh                 # Skrypt wdrożenia
-```
-
-## 🔒 Bezpieczeństwo
-
-⚠️ **WAŻNE**: Nigdy nie commituj następujących plików:
-- `.env` - zawiera hasła i klucze API
-- `service_account.json` - zawiera klucze Google
-- `user_mappings.json` - zawiera dane osobowe
-- `*.log` - mogą zawierać wrażliwe informacje
-
-Wszystkie wrażliwe dane są automatycznie ignorowane przez `.gitignore`.
-
-## 📊 Monitorowanie
-
-### Logi
-```bash
-tail -f aliexpress_tracker.log
-```
-
-### Menu diagnostyczne
-```bash
-python main.py --menu
-```
-
-## 📝 Licencja
-
-Ten projekt jest prywatny i przeznaczony do użytku osobistego.
-
----
-
-**Uwaga**: Ten projekt obsługuje dane osobowe. Upewnij się, że przestrzegasz lokalnych przepisów o ochronie danych.
-
-UPDATE:
 AliExpress & Multi-Carrier Order Tracker
-Zaawansowany, automatyczny system do śledzenia zamówień z AliExpress (i nie tylko) poprzez analizę wiadomości email i synchronizację z Arkuszem Google. System działa w trybie ciągłym (24/7), inteligentnie zarządzając statusami kont i limitami API.
+Zaawansowany, automatyczny system do śledzenia zamówień z AliExpress (i nie tylko) poprzez analizę wiadomości email i synchronizację z Arkuszem Google. System działa w trybie ciągłym (24/7), inteligentnie zarządzając statusami kont email i limitami API.
 
 🚀 Kluczowe Funkcjonalności
-🧠 Tryb Hybrydowy (AI + Regex)
-Podstawowa analiza: Wykorzystuje OpenAI (GPT) do precyzyjnego wyciągania danych z trudnych maili.
+🧠 Tryb Hybrydowy (AI + Regex):
 
-Awaryjny Fallback: W przypadku błędu API (np. Limit 429 Too Many Requests), system automatycznie przełącza się na zaawansowane wyrażenia regularne (Regex), zapewniając ciągłość działania bez utraty danych.
+AI (OpenAI GPT): Precyzyjna analiza trudnych maili.
 
-🚚 Obsługa Wielu Przewoźników
-System rozpoznaje i obsługuje specyficzne formaty maili od:
+Regex Fallback: Automatyczne przełączenie na wyrażenia regularne w przypadku błędu API lub limitów (Rate Limiting), zapewniające ciągłość działania.
 
-AliExpress (Potwierdzenia, W transporcie)
+🚚 Obsługa Wielu Przewoźników: Rozpoznaje specyficzne formaty maili od:
 
-InPost (Paczkomaty: Nadanie, Odbiór, Kod QR)
+AliExpress: Potwierdzenia, wysyłka, statusy "Closed".
 
-Poczta Polska (Pocztex, Listy polecone)
+InPost: Nadanie, Odbiór, Kody QR.
 
-DHL / DPD / GLS (Obsługa standardowa)
+Poczta Polska / Pocztex / Listy polecone.
 
-🔄 Inteligentny Handover (Przekazywanie Paczek)
-Wykrywa sytuację, w której numer śledzenia zmienia się po przekroczeniu granicy (np. AliExpress LP... -> Poczta Polska PX...).
+Kurierzy: DHL, DPD, GLS.
 
-Nie tworzy duplikatów: Aktualizuje istniejący wiersz w arkuszu, podmieniając numer paczki i zachowując historię w notatkach.
+🔄 Inteligentny Handover: Wykrywa zmianę numeru śledzenia (np. z AliExpress LP... na Poczta Polska PX...) i aktualizuje istniejący wiersz w arkuszu zamiast tworzyć duplikat.
 
-👥 Zarządzanie Kontami (Multi-Account)
-Obsługa wielu skrzynek: Monitoruje nieograniczoną liczbę kont email (zdefiniowanych w Arkuszu Google).
+👥 Zarządzanie Kontami (Multi-Account):
 
-Statusy dostępności: Automatycznie oznacza konta w arkuszu jako "Zajęty" (Czerwony) lub "Wolny" na podstawie ostatniej aktywności mailowej.
+Monitorowanie nieograniczonej liczby skrzynek email.
 
-Globalne hasło: Możliwość zdefiniowania jednego hasła w config.py dla wszystkich kont (np. Interia), bez konieczności wpisywania ich w arkuszu.
+Wizualizacja statusu w arkuszu: Czerwony (Zajęty/Ma paczkę) / Biały (Wolny).
 
-🛠️ Narzędzia Administracyjne
-Health Check Server: Wbudowany serwer HTTP (port 8081) zwracający status JSON (/health) dla monitoringu uptime'u.
+Obsługa globalnego hasła dla wszystkich kont (definiowane w config.py).
 
-Reprocess Mode: Komenda CLI do "naprawy" historii lub ponownego przetworzenia starych maili bez wpływu na bieżące działanie.
+🛠️ Bezpieczeństwo i Stabilność:
 
-Graceful Shutdown: Bezpieczne zamykanie procesu z zapisem stanu (app_state.json), zapobiegające uszkodzeniu danych.
+Graceful Shutdown: Bezpieczne zamykanie procesu z zapisem stanu (app_state.json).
+
+Health Check Server: Wbudowany monitoring HTTP na porcie 8081.
 
 📋 Wymagania
 Python 3.8+
@@ -181,7 +41,7 @@ Konto Google Cloud (Service Account) z dostępem do Google Sheets API
 
 Klucz OpenAI API (opcjonalne, ale zalecane dla lepszej precyzji)
 
-Skonfigurowane konta email (IMAP włączony)
+Konta email z włączonym dostępem IMAP
 
 🔧 Instalacja
 Sklonuj repozytorium:
@@ -195,90 +55,84 @@ Zainstaluj zależności:
 Bash
 
 pip install -r requirements.txt
-Konfiguracjaplików:
+Skonfiguruj zmienne środowiskowe:
 
-Skopiuj .env.example do .env i uzupełnij klucz OpenAI.
+Bash
 
-Umieść plik klucza Google jako service_account.json.
+cp .env.example .env
+Edytuj plik .env i uzupełnij klucze (OpenAI, dane email dla trybu testowego).
 
-Edytuj config.py (ustaw ID Arkusza, nazwy zakładek, domyślne hasło email).
+Skonfiguruj Google Service Account:
 
-⚙️ Struktura Arkusza Google
-System wymaga dwóch głównych zakładek w arkuszu:
+Utwórz projekt w Google Cloud Console i włącz Google Sheets API.
 
-Orders (Główna):
+Wygeneruj klucz JSON dla Service Account i zapisz go jako service_account.json w głównym folderze.
 
-Kolumny A-O (Email, Produkt, Adres, Telefon, Tracking, Status, Data, Link, QR Code, itd.).
+Ważne: Udostępnij swój Arkusz Google dla adresu email widocznego w pliku service_account.json.
 
-Accounts (Konta):
+⚙️ Konfiguracja Arkusza i Haseł
+System wymaga dwóch zakładek w Arkuszu Google. Hasła do kont email są pobierane z pliku konfiguracyjnego, a nie z arkusza.
 
-Kolumna A: Email
+Orders (Główna tabela):
 
-Kolumna B: Status (Zajęty/Wolny - aktualizowane przez bota)
+Przechowuje dane o paczkach (Email, Produkt, Tracking, Status, Linki, QR, itd.).
 
-Kolumna C: Hasło (Opcjonalne - jeśli puste, użyte zostanie DEFAULT_EMAIL_PASSWORD z configu).
+Accounts (Baza kont):
 
-🚀 Uruchomienie
-1. Tryb Standardowy (Live)
-Uruchamia główną pętlę monitorowania, health check i aktualizację statusów.
+Kolumna A: Adres Email.
+
+Kolumna B: Status (bot wpisuje tu "wolny" lub "-"). Komórki są automatycznie kolorowane na czerwono, gdy konto jest zajęte.
+
+Uwaga: W arkuszu wystarczą tylko te dwie kolumny. Hasło jest pobierane globalnie ze zmiennej DEFAULT_EMAIL_PASSWORD w pliku config.py.
+
+🚀 Uruchomienie i Obsługa
+1. Tryb Standardowy (Live Loop)
+Uruchamia bota w trybie ciągłym. Sprawdza maile, aktualizuje arkusz i zarządza kolorami w zakładce Accounts.
 
 Bash
 
 python3 main.py
-2. Tryb Reprocess (Naprawa Historii)
-Służy do przeszukania starych maili i uzupełnienia brakujących danych w arkuszu (nie zmienia statusów "Zajęty").
+2. Menu Diagnostyczne
+Pozwala sprawdzić statusy, wyczyścić logi, przetestować API lub sprawdzić mapowania.
 
 Bash
 
-# Przetwórz 30 ostatnich maili dla konkretnego konta
-python3 main.py --reprocess-email twoj.email@interia.pl --limit 30
-📊 Monitoring (Health Check)
-Gdy bot działa, możesz sprawdzić jego stan w przeglądarce lub przez curl:
+python3 main.py --menu
+3. Tryb Reprocess (Naprawa Historii) 🛠️
+Specjalny tryb służący do przeszukania historii mailowej i uzupełnienia brakujących danych w arkuszu. Przydatny, gdy bot był wyłączony przez kilka dni lub dodałeś nowe konto z istniejącymi zamówieniami.
+
+Cechy trybu Reprocess:
+
+Działa jednorazowo (nie jest pętlą).
+
+Ignoruje blokady czasowe (sprawdza głęboko wstecz, np. 60 dni).
+
+Wymusza aktualizację mapowań w pliku user_mappings.json.
+
+Automatycznie aktualizuje kolory w zakładce Accounts po zakończeniu pracy (oznacza zajęte konta na czerwono).
+
+Jak używać:
 
 Bash
 
-curl http://localhost:8081/health
-Przykładowa odpowiedź:
+# Składnia:
+# python3 main.py --reprocess-email <ADRES_EMAIL> --limit <LICZBA_MAILI>
 
-JSON
+# Przykład 1: Przetwórz 10 ostatnich zamówień dla konkretnego konta
+python3 main.py --reprocess-email jan.kowalski@interia.pl --limit 10
 
-{
-  "status": "healthy",
-  "uptime": "2026-01-11T17:30:00",
-  "processed_emails": 15,
-  "service": "aliexpress_tracker"
-}
-📁 Struktura Projektu
-Plaintext
+# Przykład 2: Pełny skan konta (bez limitu, domyślny zakres dni z configu)
+python3 main.py --reprocess-email jan.kowalski@interia.pl
+🐧 Wdrażanie na Linux (Systemd)
+Aby bot działał w tle 24/7 i uruchamiał się po restarcie serwera, używamy systemd.
 
-├── main.py                    # Główny punkt wejścia, pętla główna, CLI
-├── config.py                  # Konfiguracja stałych i haseł
-├── email_handler.py           # Logika pobierania i analizy emaili
-├── sheets_handler.py          # Komunikacja z Google Sheets (Singleton)
-├── carriers_sheet_handlers.py # Logika dla poszczególnych przewoźników (InPost, Poczta, etc.)
-├── openai_handler.py          # Obsługa zapytań do GPT-4o/3.5
-├── health_check.py            # Serwer monitoringu HTTP
-├── graceful_shutdown.py       # Obsługa sygnałów zamknięcia (SIGINT/SIGTERM)
-├── app_state.json             # Zapis stanu aplikacji
-├── user_mappings.json         # Baza powiązań Email <-> Użytkownik (cache)
-└── requirements.txt           # Zależności
-🔒 Bezpieczeństwo
-Pliki .env, service_account.json, *.log oraz user_mappings.json są wykluczone z repozytorium (.gitignore).
-
-Hasła w arkuszu są opcjonalne – zaleca się używanie DEFAULT_EMAIL_PASSWORD w config.py dla bezpieczeństwa.
-
-📝 Status Projektu
-✅ Wdrożony i Stabilny. System poprawnie obsługuje limity API (Rate Limiting), konflikty numerów paczek (Handover) oraz wiele kont jednocześnie.
-
-🐧 Wdrożenie na Linux (Systemd Service)
-Aby bot działał 24/7 w tle i wstawał po restarcie systemu:
-
+Instalacja usługi
 Utwórz plik usługi:
 
 Bash
 
 sudo nano /etc/systemd/system/ali-tracker.service
-Wklej konfigurację:
+Wklej konfigurację (dostosuj ścieżki!):
 
 Ini, TOML
 
@@ -288,29 +142,79 @@ After=network.target
 
 [Service]
 User=twoja_nazwa_uzytkownika
-WorkingDirectory=/home/twoja_nazwa/sciezka/do/bota
+WorkingDirectory=/home/twoja_nazwa/aliexpress-tracker
 ExecStart=/usr/bin/python3 main.py
+# WAŻNE: Restartuje bota automatycznie po 10 sek w razie błędu/zamknięcia
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-Uruchom usługę:
+Załaduj i uruchom:
 
 Bash
 
 sudo systemctl daemon-reload
 sudo systemctl enable ali-tracker
 sudo systemctl start ali-tracker
+🛑 Jak zatrzymać bota (Zarządzanie działaniem w tle)
+Ponieważ w konfiguracji jest Restart=always, zwykłe "zabicie" procesu (kill) nic nie da – system wstanie po 10 sekundach. Aby go skutecznie zatrzymać:
 
-Restart bota (np. po zmianie hasła w config.py):
-sudo systemctl restart ali-tracker.service
+Tymczasowe zatrzymanie (do momentu restartu serwera lub ręcznego włączenia):
 
-stop
+Bash
+
 sudo systemctl stop ali-tracker
+Użyj tego, gdy chcesz ręcznie odpalić python3 main.py w terminalu (np. do testów), aby uniknąć konfliktów dwóch instancji.
 
-Monitoring:
+Całkowite wyłączenie (nie wstanie nawet po restarcie serwera):
 
-Podgląd logów na żywo: journalctl -u ali-tracker -f
+Bash
 
-Status usługi: sudo systemctl status ali-tracker
+sudo systemctl disable --now ali-tracker
+
+Aby pozniej wystartowac:
+sudo systemctl enable --now ali-tracker
+
+Po wystartowaniu zawsze warto sprawdzić status, aby upewnić się, że bot nie wywalił się na starcie (np. przez błąd w kodzie):
+
+Bash
+
+sudo systemctl status ali-tracker
+
+Ponowne uruchomienie (np. po zmianie kodu lub configu):
+
+Bash
+
+sudo systemctl restart ali-tracker
+Sprawdzenie statusu i logów:
+
+Bash
+
+sudo systemctl status ali-tracker
+# Podgląd logów na żywo:
+journalctl -u ali-tracker -f
+📁 Struktura projektu
+Plaintext
+
+├── main.py                    # Główny plik, CLI, pętla główna
+├── config.py                  # Ustawienia, hasła, limity
+├── email_handler.py           # Logika IMAP, pobieranie maili
+├── sheets_handler.py          # Komunikacja z Google Sheets API
+├── carriers_sheet_handlers.py # Logika kolorowania kont i specyfika przewoźników
+├── aliexpress_handler.py      # Specjalistyczny parser dla AliExpress (Regex/AI)
+├── openai_handler.py          # Integracja z GPT-4o/3.5
+├── graceful_shutdown.py       # Bezpieczne zamykanie procesów
+├── app_state.json             # Plik stanu (nie usuwać ręcznie w trakcie pracy)
+├── user_mappings.json         # Cache powiązań Email <-> Tracking
+└── requirements.txt           # Zależności
+📊 Monitoring Health Check
+Gdy bot działa w tle, możesz sprawdzić jego kondycję bez wchodzenia w logi:
+
+Bash
+
+curl http://localhost:8081/health
+Odpowiedź JSON zawiera czas działania (uptime) oraz liczbę przetworzonych maili.
+
+🔒 Bezpieczeństwo
+⚠️ WAŻNE: Pliki .env, service_account.json oraz *.log zawierają wrażliwe dane. Są one domyślnie dodane do .gitignore. Nigdy ich nie upubliczniaj.
