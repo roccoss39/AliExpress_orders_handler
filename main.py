@@ -869,9 +869,9 @@ def show_diagnostic_menu():
         
         input("\n⏎ Naciśnij Enter aby kontynuować...")
 
-# Na końcu main.py
+
 def run_reprocess(target_email, limit=None):
-    #np. python3 main.py --reprocess-email znowu.ja1@interia.pl --limit 5
+    # np. python3 main.py --reprocess-email znowu.ja1@interia.pl --limit 5
     logging.info(f"🛠️ URUCHAMIAM TRYB REPROCESS DLA: {target_email}")
     if limit:
         logging.info(f"🔢 Cel: Przetworzyć {limit} zamówień (zaczynając od najstarszych)")
@@ -883,7 +883,7 @@ def run_reprocess(target_email, limit=None):
         logging.error("❌ Błąd połączenia z arkuszem.")
         return
 
-    # 1. Pobierz WSZYSTKIE maile z okresu (bez limitu tutaj)
+    # 1. Pobierz WSZYSTKIE maile z okresu
     emails = email_handler.fetch_specific_account_history(target_email, days_back=60)
     
     if not emails:
@@ -891,30 +891,25 @@ def run_reprocess(target_email, limit=None):
         return
 
     logging.info(f"Pobrano {len(emails)} maili z serwera. Rozpoczynam filtrowanie i analizę...")
-    processed_count = 0 # Licznik faktycznie przetworzonych (zaakceptowanych) maili
+    processed_count = 0 
     
     # 2. Przetwarzaj maile
     for source, msg in emails:
-        # ✅ SPRAWDZENIE LIMITU PRZETWORZONYCH ZAMÓWIEŃ
         if limit and processed_count >= limit:
             logging.info(f"🛑 Osiągnięto limit {limit} przetworzonych zamówień. Kończę pracę.")
             break
 
         try:
-            # Wyciągnij datę i temat
             email_date = email_handler.extract_email_date(msg)
             raw_subject = msg.get("Subject", "")
             subject = email_handler.decode_email_subject(raw_subject)
             
-            # FILTR WSTĘPNY (Decyduje, czy mail to zamówienie)
             keywords = ["paczka", "zamówienie", "order", "delivery", "dostawa", "odbierz", "nadana", "status", "inpost", "dhl", "dpd", "gls", "poczta"]
             if not any(k in subject.lower() for k in keywords):
-                # To jest spam/nieistotny mail - pomijamy i NIE wliczamy do limitu
                 continue
 
             body = email_handler.get_email_body(msg)
             
-            # Ustal odbiorcę
             to_header = msg.get("To", "")
             recipient = target_email 
             if to_header:
@@ -925,48 +920,46 @@ def run_reprocess(target_email, limit=None):
             
             logging.info(f"🔍 Reprocess (Znaleziono {processed_count}/{limit if limit else '∞'}): {email_date} | {subject[:50]}...")
             
-            # 3. Analiza z FORCE_PROCESS=True (ignoruje daty w mappings)
             order_data = email_handler.analyze_email(
                 subject, body, recipient, source, 
                 recipient_name=recipient, email_message=msg, email_date=email_date,
                 force_process=True 
             )
             
-            # Jeśli analyze_email zwróciło dane (czyli mail był o paczce)
             if order_data:
-                # Upewnij się, że data jest w danych
                 if not order_data.get("email_date") and email_date:
                     order_data["email_date"] = email_date
                 
                 user_key = order_data.get("user_key")
                 if user_key:
-                    # 1. Mapowanie Zamówienia
                     if order_data.get("order_number"):
                         email_handler._save_user_order_mapping(user_key, order_data["order_number"])
-                        logging.info(f"💾 Zapisano mapowanie: {user_key} -> Order {order_data['order_number']}")
-                    
-                    # 2. Mapowanie Paczki
                     if order_data.get("package_number"):
                         email_handler._save_user_package_mapping(user_key, order_data["package_number"])
-                        logging.info(f"💾 Zapisano mapowanie: {user_key} -> Paczka {order_data['package_number']}")
 
-                # Zapisz do arkusza używając logiki Carrierów
                 carrier_name = order_data.get("carrier", "InPost")
                 carrier = sheets_handler.carriers.get(carrier_name)
                 
                 if carrier:
                     carrier.process_notification(order_data)
-                    logging.info(f"✅ Przetworzono reprocess: {subject[:30]}")
-                    # ✅ ZWIĘKSZAMY LICZNIK TYLKO GDY SUKCES (TO BYŁO ZAMÓWIENIE)
                     processed_count += 1 
                 else:
-                    # Fallback
                     sheets_handler._direct_create_row(order_data)
-                    logging.info(f"✅ Przetworzono reprocess (direct): {subject[:30]}")
                     processed_count += 1
                 
         except Exception as e:
             logging.error(f"Błąd przy reprocess maila: {e}")
+
+    # --- 🟢 NOWA SEKCJA: AKTUALIZACJA ZAKŁADKI ACCOUNTS ---
+    try:
+        logging.info("🎨 REPROCESS: Aktualizacja statusów i kolorów w zakładce Accounts...")
+        from carriers_sheet_handlers import EmailAvailabilityManager
+        availability_manager = EmailAvailabilityManager(sheets_handler)
+        availability_manager.check_email_availability()
+        logging.info("✅ Zakładka Accounts została zsynchronizowana z nowymi mapowaniami.")
+    except Exception as e:
+        logging.error(f"❌ Błąd podczas aktualizacji kolorów Accounts po reprocess: {e}")
+    # ------------------------------------------------------
             
     logging.info(f"🏁 Zakończono reprocess. Przetworzono skutecznie: {processed_count} zamówień.")
 

@@ -209,17 +209,24 @@ class AliexpressDataHandler(BaseDataHandler):
         # 4. Wyciągnij numer zamówienia (Order ID) - ULEPSZONY REGEX
         order_number = None
         
-        # Wzorzec 1: Szukaj w temacie (np. "Zamówienie 3066686103006644")
-        # Obsługuje dwukropek, spację, hash, lub nic między słowem a numerem
-        match = re.search(r'(?:Zamówienie|Order|Order ID)[:\s#]+(\d{10,})', subject, re.IGNORECASE)
-        if match:
-            order_number = match.group(1)
-        else:
-            # Wzorzec 2: Szukaj w treści, jeśli nie ma w temacie
-            if body:
-                match_body = re.search(r'(?:Order ID|Order No\.|Numer zamówienia|Zamówienie)[:\s]+(\d{10,})', body, re.IGNORECASE)
-                if match_body:
-                    order_number = match_body.group(1)
+        # Wzorzec 1: Szukaj w temacie
+        # DODANO: 'Your' oraz obsługę numeru występującego przed 'is closed'
+        patterns = [
+            r'(?:Zamówienie|Order|Order ID|Your)[:\s#]+(\d{10,})',  # Standardowe: Order 123... lub Your 123...
+            r'(\d{15,16})\s+is\s+closed'                             # Specyficzne: 123... is closed
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, subject, re.IGNORECASE)
+            if match:
+                order_number = match.group(1)
+                break
+
+        # Jeśli nie znaleziono w temacie, szukaj w treści
+        if not order_number and body:
+            match_body = re.search(r'(?:Order ID|Order No\.|Numer zamówienia|Zamówienie)[:\s]+(\d{10,})', body, re.IGNORECASE)
+            if match_body:
+                order_number = match_body.group(1)
 
         # Logowanie wyniku
         if order_number:
