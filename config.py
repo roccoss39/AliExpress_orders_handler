@@ -10,11 +10,12 @@ load_dotenv(override=True)
 # 'ACCOUNTS' - sprawdza tylko maile wpisane w zakładce "Accounts" w Google Sheets
 EMAIL_TRACKING_MODE = 'ACCOUNTS'
 
+# Normal work : True
 # True  = Sprawdza tylko te z "kropką" (UNSEEN). Szybkie, oszczędne.
 # False = Sprawdza WSZYSTKIE maile z zakresu dat (nawet te otwarte). Wolniejsze, ale pewniejsze.
 CHECK_ONLY_UNSEEN = False
 
-# Czy przetwarzać również przeczytane maile?
+# Czy przetwarzać również przeczytane maile? Tryb dla fun reprocess
 # True = Pobiera wszystko z ostatnich dni (UWAGA: zużywa więcej tokenów AI)
 # False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
 PROCESS_READ_EMAILS = False # Huge API calls
@@ -37,7 +38,7 @@ NOTIFICATION_EMAIL = os.getenv('NOTIFICATION_EMAIL')
 DEFAULT_EMAIL_PASSWORD = INTERIA_PASSWORD 
 
 # Interwał sprawdzania (w minutach)
-CHECK_INTERVAL = 1
+CHECK_INTERVAL = 5
 
 # Interwał dla testów (w sekundach)
 TEST_INTERVAL = 10
@@ -46,7 +47,7 @@ TEST_INTERVAL = 10
 TEST_MODE = False  # Ustawiamy na False żeby działał main_loop
 
 # Szybkie sprawdzanie (co 10 sekund)
-QUICK_CHECK = True  # Nowa opcja dla szybkiego sprawdzania
+QUICK_CHECK = False  # Nowa opcja dla szybkiego sprawdzania
 
 # Kolory statusów (wartości RGB)
 COLORS = {

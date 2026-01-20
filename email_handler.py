@@ -869,9 +869,11 @@ class EmailHandler:
                 }
                 timeout = timeout_settings.get(source, 30)
                 
+                #logging.info(f"DEBUG LOGIN: Próba logowania na {email_addr} hasłem: {password}")
+
                 # Połączenie z serwerem z timeout
                 client = imaplib.IMAP4_SSL(imap_server, port, timeout=timeout)
-                client.login(email_addr, password)
+                client.login(email_addr.lower(), password)
                 
                 logging.info(f"✅ Połączono z {source}: {email_addr}")
                 return client

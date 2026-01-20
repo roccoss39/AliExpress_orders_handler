@@ -269,3 +269,48 @@ Hasła w arkuszu są opcjonalne – zaleca się używanie DEFAULT_EMAIL_PASSWORD
 
 📝 Status Projektu
 ✅ Wdrożony i Stabilny. System poprawnie obsługuje limity API (Rate Limiting), konflikty numerów paczek (Handover) oraz wiele kont jednocześnie.
+
+🐧 Wdrożenie na Linux (Systemd Service)
+Aby bot działał 24/7 w tle i wstawał po restarcie systemu:
+
+Utwórz plik usługi:
+
+Bash
+
+sudo nano /etc/systemd/system/ali-tracker.service
+Wklej konfigurację:
+
+Ini, TOML
+
+[Unit]
+Description=AliExpress Order Tracker Bot
+After=network.target
+
+[Service]
+User=twoja_nazwa_uzytkownika
+WorkingDirectory=/home/twoja_nazwa/sciezka/do/bota
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+Uruchom usługę:
+
+Bash
+
+sudo systemctl daemon-reload
+sudo systemctl enable ali-tracker
+sudo systemctl start ali-tracker
+
+Restart bota (np. po zmianie hasła w config.py):
+sudo systemctl restart ali-tracker.service
+
+stop
+sudo systemctl stop ali-tracker
+
+Monitoring:
+
+Podgląd logów na żywo: journalctl -u ali-tracker -f
+
+Status usługi: sudo systemctl status ali-tracker

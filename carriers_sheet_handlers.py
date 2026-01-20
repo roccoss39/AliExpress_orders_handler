@@ -1225,14 +1225,6 @@ class EmailAvailabilityManager:
         """
         Pobiera listę emaili z zakładki Accounts wraz z hasłami.
         Zwraca listę słowników z pełną konfiguracją.
-        
-        Returns:
-            list: [{
-                'email': 'test@interia.pl',
-                'password': '...',
-                'source': 'interia',
-                'status': 'active'
-            }, ...]
         """
         if not self.worksheet:
             self._init_accounts_worksheet()
@@ -1251,14 +1243,14 @@ class EmailAvailabilityManager:
             
             email_configs = []
             
-            # Struktura: A=Email, B=Status, C=Password, D=Source
+            # Struktura: A=Email, B=Status, C=Password, D=Notatki (Ignorowane)
             for i, row in enumerate(accounts_data[1:], start=2):
                 try:
                     if len(row) < 1:
                         continue
                     
-                    email = row[0].strip() if row[0] else ""
-                    if not email:
+                    account_email = row[0].strip() if row[0] else ""
+                    if not account_email:
                         continue
                     
                     # Status (kolumna B)
@@ -1266,58 +1258,60 @@ class EmailAvailabilityManager:
                     
                     # Pomijaj nieaktywne
                     if status in ['inactive', 'delivered', 'stopped', 'paused']:
-                        logging.info(f"⏭️ Email {email} ma status '{status}' - pomijam")
+                        logging.info(f"⏭️ Email {account_email} ma status '{status}' - pomijam")
                         continue
                     
                     # Hasło (kolumna C)
-                    password = row[2].strip() if len(row) > 2 and row[2] else ""
+                    password = config.DEFAULT_EMAIL_PASSWORD
                     
-                    # Źródło (kolumna D)
-                    source = row[3].strip().lower() if len(row) > 3 and row[3] else ""
+                    # 🔴 ZMIANA TUTAJ: Ignorujemy kolumnę D (Notatki)
+                    # Wcześniej: source = row[3]...
+                    # Teraz: Wymuszamy puste źródło, żeby zadziałała auto-detekcja
+                    source = "" 
                     
-                    # ✅ AUTO-DETEKCJA ŹRÓDŁA
+                    # ✅ AUTO-DETEKCJA ŹRÓDŁA (Teraz wykona się ZAWSZE)
                     if not source:
-                        if '@gmail.com' in email.lower():
+                        if '@gmail.com' in account_email.lower():
                             source = 'gmail'
-                        elif '@interia.pl' in email.lower():
+                        elif '@interia.pl' in account_email.lower() or '@poczta.fm' in account_email.lower():
                             source = 'interia'
-                        elif '@o2.pl' in email.lower():
+                        elif '@o2.pl' in account_email.lower() or '@tlen.pl' in account_email.lower():
                             source = 'o2'
                         else:
-                            logging.warning(f"⚠️ Nie można określić źródła dla {email}, używam 'gmail'")
+                            # Domyślnie gmail (bezpieczny fallback)
+                            logging.warning(f"⚠️ Nie można określić źródła dla {account_email}, używam 'gmail'")
                             source = 'gmail'
-                        logging.info(f"🔍 Auto-wykryto źródło '{source}' dla {email}")
+                        
+                        # (Opcjonalnie: mniej logowania, żeby nie śmiecić przy każdym sprawdzeniu)
+                        # logging.info(f"🔍 Auto-wykryto źródło '{source}' dla {email}")
                     
                     # ✅ HASŁO - HIERARCHIA
                     if not password:
                         # 1. Sprawdź EMAIL_PASSWORDS_MAP
-                        if hasattr(config, 'EMAIL_PASSWORDS_MAP') and email in config.EMAIL_PASSWORDS_MAP:
-                            password = config.EMAIL_PASSWORDS_MAP[email]
-                            logging.debug(f"🔑 Znaleziono hasło dla {email} w EMAIL_PASSWORDS_MAP")
+                        if hasattr(config, 'EMAIL_PASSWORDS_MAP') and account_email in config.EMAIL_PASSWORDS_MAP:
+                            password = config.EMAIL_PASSWORDS_MAP[account_email]
                         # 2. Użyj DEFAULT_EMAIL_PASSWORD
                         elif hasattr(config, 'DEFAULT_EMAIL_PASSWORD') and config.DEFAULT_EMAIL_PASSWORD:
                             password = config.DEFAULT_EMAIL_PASSWORD
-                            logging.info(f"🔑 Używam domyślnego hasła dla {email}")
                         else:
-                            logging.warning(f"⚠️ Brak hasła dla {email} - pomijam")
+                            logging.warning(f"⚠️ Brak hasła dla {account_email} - pomijam")
                             continue
                     
                     # Dodaj do listy
                     email_config = {
-                        'email': email,
+                        'email': account_email,
                         'password': password,
                         'source': source,
                         'status': status
                     }
                     
                     email_configs.append(email_config)
-                    logging.info(f"✅ Dodano email do śledzenia: {email} (źródło: {source}, status: {status})")
                     
                 except Exception as e:
                     logging.error(f"❌ Błąd przetwarzania wiersza {i}: {e}")
                     continue
             
-            logging.info(f"📧 Znaleziono {len(email_configs)} aktywnych emaili do śledzenia w Accounts")
+            logging.info(f"📧 Znaleziono {len(email_configs)} aktywnych emaili w Accounts")
             return email_configs
             
         except Exception as e:
@@ -1387,7 +1381,7 @@ class EmailAvailabilityManager:
                     # ✅ Używamy natywnej metody .format() z gspread
                     # To może chwilę potrwać przy wielu kontach, ale jest bezpieczne
                     try:
-                        sheet.format(f"A{i}:C{i}", red_format)
+                        sheet.format(f"A{i}:B{i}", red_format)
                     except Exception:
                         pass # Ignoruj błędy formatowania, to tylko kosmetyka
 
@@ -1398,7 +1392,7 @@ class EmailAvailabilityManager:
                     
                     # ✅ Kolorowanie na biało
                     try:
-                        sheet.format(f"A{i}:C{i}", white_format)
+                        sheet.format(f"A{i}:B{i}", white_format)
                     except Exception:
                         pass
 
