@@ -16,7 +16,6 @@ class EmailHandler:
     def __init__(self):
         """Inicjalizacja obsługi email"""
         self.mappings_file = "user_mappings.json"
-        self.user_mappings = {}
         self.last_check_time = time.time() - (3600 * 24)  # 24 godziny wstecz
         self.openai_handler = OpenAIHandler()
 
@@ -29,30 +28,28 @@ class EmailHandler:
                 'imap_server': 'poczta.interia.pl',
                 'port': 993
             },
-            'o2': {  # ✅ DODAJ O2
+            'o2': {
                 'imap_server': 'poczta.o2.pl',
                 'port': 993
             }
         }
         
-        try:
-            with open(self.mappings_file, 'r') as f:
-                self.user_mappings = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.user_mappings = {}
+        # ✅ POPRAWKA 1: Używamy metody _load_mappings zamiast surowego json.load
+        # Dzięki temu klucze są od razu znormalizowane (lowercase)
+        self.user_mappings = self._load_mappings()
 
-        # Inicjalizacja handlerów danych - ✅ POPRAWIONA KOLEJNOŚĆ
+        # Inicjalizacja handlerów danych
         from carriers_data_handlers import AliexpressDataHandler, InPostDataHandler, DHLDataHandler, DPDDataHandler, GLSDataHandler, PocztaPolskaDataHandler
         self.data_handlers = [
             PocztaPolskaDataHandler(self),
-            GLSDataHandler(self),           # ✅ GLS NAJPIERW!
-            InPostDataHandler(self),        # InPost ma specyficzne wzorce
-            DHLDataHandler(self),           # DHL ma specyficzne wzorce
-            AliexpressDataHandler(self),    # AliExpress
-            DPDDataHandler(self),           # ✅ DPD NA KOŃCU (najogólniejszy)
+            GLSDataHandler(self),           
+            InPostDataHandler(self),        
+            DHLDataHandler(self),           
+            AliexpressDataHandler(self),    
+            DPDDataHandler(self),           
         ]
         
-        self.local_tz = pytz.timezone('Europe/Warsaw')  # DODAJ TO
+        self.local_tz = pytz.timezone('Europe/Warsaw')
 
     def _load_mappings(self):
         """Wczytuje zapisane mapowania z pliku i normalizuje klucze"""
@@ -60,7 +57,7 @@ class EmailHandler:
             try:
                 with open(self.mappings_file, 'r', encoding='utf-8') as f:
                     raw_data = json.load(f)
-                    # ✅ NORMALIZACJA PRZY ODCZYCIE (wymuś małe litery)
+                    # Normalizacja przy odczycie (wymuś małe litery)
                     normalized_data = {}
                     for key, value in raw_data.items():
                         normalized_key = key.lower().strip()
@@ -74,61 +71,53 @@ class EmailHandler:
         """Zapisuje mapowania użytkowników do pliku JSON z ładnym formatowaniem"""
         try:
             with open(self.mappings_file, 'w', encoding='utf-8') as f:
-                # ✅ DODAJ indent=2 dla czytelności
                 json.dump(self.user_mappings, f, indent=2, ensure_ascii=False)
             logging.info(f"Zapisano mapowania do {self.mappings_file}")
         except Exception as e:
             logging.error(f"Błąd podczas zapisywania mapowań: {e}")
 
-    # --- Usunięto zduplikowane definicje ---
-
     def _save_user_order_mapping(self, user_key, order_number):
-        """Zapisuje powiązanie użytkownika z numerem zamówienia - ROZSZERZONA WERSJA"""
+        """Zapisuje powiązanie użytkownika z numerem zamówienia"""
         if not user_key or not order_number:
             return
             
-        # Znormalizuj klucz użytkownika
         user_key = user_key.lower()
 
         if user_key not in self.user_mappings:
             self.user_mappings[user_key] = {
                 "order_numbers": [], 
                 "package_numbers": [],
-                "last_email_date": None  # DODAJ POLE NA DATĘ
+                "last_email_date": None
             }
         
         if "order_numbers" not in self.user_mappings[user_key]:
             self.user_mappings[user_key]["order_numbers"] = []
         
-        # Dodaj last_email_date jeśli nie istnieje
         if "last_email_date" not in self.user_mappings[user_key]:
             self.user_mappings[user_key]["last_email_date"] = None
             
-        # Jeśli użytkownik już ma zamówienia, dodaj nowe tylko jeśli jest unikalne
         if order_number not in self.user_mappings[user_key]["order_numbers"]:
             self.user_mappings[user_key]["order_numbers"].append(order_number)
             logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> zamówienie {order_number}")
             self._save_mappings()
 
     def _save_user_package_mapping(self, user_key, package_number):
-        """Zapisuje powiązanie użytkownika z numerem paczki - ROZSZERZONA WERSJA"""
+        """Zapisuje powiązanie użytkownika z numerem paczki"""
         if not user_key or not package_number:
             return
             
-        # Znormalizuj klucz użytkownika
         user_key = user_key.lower()
 
         if user_key not in self.user_mappings:
             self.user_mappings[user_key] = {
                 "order_numbers": [], 
                 "package_numbers": [],
-                "last_email_date": None  # DODAJ POLE NA DATĘ
+                "last_email_date": None
             }
         
         if "package_numbers" not in self.user_mappings[user_key]:
             self.user_mappings[user_key]["package_numbers"] = []
             
-        # Dodaj last_email_date jeśli nie istnieje
         if "last_email_date" not in self.user_mappings[user_key]:
             self.user_mappings[user_key]["last_email_date"] = None
             
@@ -140,15 +129,14 @@ class EmailHandler:
     def remove_user_mapping(self, user_key, package_number=None, order_number=None):
         """
         Usuwa zakończone zamówienie. Jeśli brak aktywnych zamówień -> usuwa całego usera.
-        Wersja ulepszona: sprawdza pustość nawet jeśli nie znaleziono konkretnej paczki.
         """
         if not user_key:
-            return
+            return False
 
         user_key = user_key.lower().strip()
         
         if user_key not in self.user_mappings:
-            return
+            return False
 
         user_data = self.user_mappings[user_key]
         changed = False
@@ -168,12 +156,8 @@ class EmailHandler:
                 logging.info(f"🗑️ Usunięto zamówienie {order_number} z mapowania {user_key}")
                 changed = True
 
-        # ====================================================================
-        # 3. SPRAWDZANIE PUSTOŚCI (ZAWSZE)
-        # ====================================================================
-        
-        # Sprawdź czy listy są puste (lub nie istnieją)
-        user_data = self.user_mappings.get(user_key, {}) # Zabezpieczenie
+        # 3. SPRAWDZANIE PUSTOŚCI
+        user_data = self.user_mappings.get(user_key, {})
         pkgs = user_data.get("package_numbers", [])
         ords = user_data.get("order_numbers", [])
         
@@ -181,19 +165,16 @@ class EmailHandler:
         has_no_orders = len(ords) == 0
         
         if has_no_packages and has_no_orders:
-            # Jeśli user jest pusty, usuwamy go CAŁKOWICIE
             if user_key in self.user_mappings:
                 del self.user_mappings[user_key]
                 logging.info(f"❌ Usunięto całkowicie wpis użytkownika {user_key} (brak aktywnych zamówień).")
                 self._save_mappings()
-                
-                return True  # 👈👈👈 TO JEST NAJWAŻNIEJSZE! MUSI TU BYĆ!
+                return True 
 
-        # Jeśli user został, ale coś zmieniliśmy
         if changed:
             self._save_mappings()
             
-        return False # 👈 Dla porządku dodaj też to na samym końcu
+        return False
 
     def fetch_new_emails(self, email_configs_override=None):
         """
@@ -202,38 +183,25 @@ class EmailHandler:
         """
         all_emails = []
         
-        # Ustal, którą listę sprawdzamy
         configs = email_configs_override if email_configs_override is not None else config.ALL_EMAIL_CONFIGS
-
-        # ✅ UŻYJ KONFIGURACJI Z config.py
-        import config as app_config
         
-        # Pobieranie ustawień
         days_back = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('days_back', 14)
         max_emails = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('max_emails_per_account', 100)
         mark_as_read = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('mark_as_read', True)
         
-        # ====================================================================
-        # ✅ LOGIKA FLAG (PROCESS_READ_EMAILS vs CHECK_ONLY_UNSEEN)
-        # ====================================================================
-        process_read_forced = getattr(app_config, 'PROCESS_READ_EMAILS', False)
-        check_only_unseen_cfg = getattr(app_config, 'CHECK_ONLY_UNSEEN', True)
+        # LOGIKA FLAG
+        process_read_forced = getattr(config, 'PROCESS_READ_EMAILS', False)
+        check_only_unseen_cfg = getattr(config, 'CHECK_ONLY_UNSEEN', True)
         
-        # Decyzja: Czy szukamy tylko nieprzeczytanych?
-        # Szukamy tylko UNSEEN, jeśli nie ma wymuszenia (process_read) I włączona jest opcja unseen
         search_only_unseen = (not process_read_forced) and check_only_unseen_cfg
         
-        # Logowanie trybu
         if process_read_forced:
             logging.warning("⚠️ TRYB PROCESS_READ_EMAILS: Pobieranie WSZYSTKICH wiadomości (wymuszenie)!")
         elif check_only_unseen_cfg:
             logging.info("🕵️ Tryb skanowania: Tylko NIEPRZECZYTANE (szybki)")
         else:
             logging.info("🕵️ Tryb skanowania: WSZYSTKIE (również otwarte) - to może potrwać dłużej")
-        # ====================================================================
         
-        # ✅ OBLICZ DATĘ GRANICZNĄ (X DNI WSTECZ)
-        from datetime import datetime, timedelta
         cutoff_date = datetime.now() - timedelta(days=days_back)
         date_string = cutoff_date.strftime('%d-%b-%Y')
         
@@ -242,9 +210,8 @@ class EmailHandler:
         for email_config in configs:
             source = email_config.get('source', 'gmail')
             email_addr = email_config.get('email')
-            password = email_config.get('password')
             
-            if not email_addr or not password:
+            if not email_addr or not email_config.get('password'):
                 logging.warning(f"Pomijanie {source}: brak kompletnej konfiguracji")
                 continue
             
@@ -259,13 +226,10 @@ class EmailHandler:
             try:
                 client.select("INBOX")
                 
-                # ✅ BUDOWANIE KRYTERIÓW WYSZUKIWANIA
                 criteria_parts = [f'(SINCE "{date_string}")']
-                
                 if search_only_unseen:
                     criteria_parts.append('(UNSEEN)')
                 
-                # Sklejamy w jeden string, np: (UNSEEN SINCE "14-Dec-2025")
                 search_criteria = " ".join(criteria_parts)
                 if len(criteria_parts) > 1:
                     search_criteria = f"({search_criteria})"
@@ -292,11 +256,9 @@ class EmailHandler:
                     else:
                         messages = [b'']
                         status = "OK"
-                # --- Obsługa standardowa (Gmail, Interia) ---
                 else:
                     status, messages = client.search(None, search_criteria)
                 
-                # ✅ PRZETWARZANIE WYNIKÓW
                 if status == "OK" and messages[0]:
                     all_msg_list = messages[0].split()
                     
@@ -308,11 +270,9 @@ class EmailHandler:
                     
                     logging.info(f"📧 Przetwarzanie {len(messages_to_process)} emaili z {source}")
                     
-                    # Sortowanie od najnowszych
                     messages_to_process.sort(key=lambda x: int(x.decode()), reverse=True)
                     
                     for num in messages_to_process:
-                        # Pobieramy nagłówki (RFC822)
                         status, msg_data = client.fetch(num, "(RFC822)")
                         if status == "OK":
                             raw_email = msg_data[0][1]
@@ -339,21 +299,15 @@ class EmailHandler:
                                 email_dt = datetime.strptime(email_date, '%Y-%m-%d %H:%M:%S')
                                 if email_dt < cutoff_date:
                                     logging.info(f"⏭️ Email z {email_date} starszy niż {days_back} dni - pomijam")
-                                    # W trybie "tylko nieprzeczytane", jeśli trafimy na stary nieprzeczytany,
-                                    # warto go oznaczyć jako przeczytany, żeby nie wracał.
                                     if search_only_unseen:
                                         emails_to_mark_read.append(num)
                                     continue
 
                             all_emails.append((source, email_message))
                             
-                            # Jeśli jesteśmy w trybie "tylko nieprzeczytane", dodajemy do listy do "odfajkowania"
-                            # W trybie pełnego skanu (search_only_unseen=False) zazwyczaj NIE chcemy
-                            # oznaczać wszystkich starych maili jako przeczytane, chyba że to wymusimy.
                             if search_only_unseen:
                                 emails_to_mark_read.append(num)
                             elif process_read_forced and mark_as_read:
-                                # Jeśli wymusiliśmy process_read, to oznaczamy
                                 emails_to_mark_read.append(num)
                 else:
                     logging.info(f"📭 Brak emaili spełniających kryteria w {source}")
@@ -363,7 +317,6 @@ class EmailHandler:
                 emails_to_mark_read = []
                     
             finally:
-                # Oznaczaj jako przeczytane
                 if mark_as_read and emails_to_mark_read:
                     try:
                         logging.info(f"📖 Oznaczanie {len(emails_to_mark_read)} emaili jako przeczytane w {source}")
@@ -372,7 +325,7 @@ class EmailHandler:
                                 client.store(num, '+FLAGS', '\\Seen')
                             except:
                                 pass
-                        client.expunge() # Zatwierdź zmiany na serwerze
+                        client.expunge()
                     except Exception as e:
                         logging.error(f"❌ Błąd oznaczania emaili: {e}")
                 
@@ -386,9 +339,7 @@ class EmailHandler:
         return all_emails
     
     def get_email_body(self, email_message):
-        """
-        Wydobycie treści e-maila z obsługą polskich kodowań (naprawa pustych maili od Poczty Polskiej).
-        """
+        """Wydobycie treści e-maila z obsługą polskich kodowań"""
         body = ""
         try:
             if email_message.is_multipart():
@@ -396,7 +347,6 @@ class EmailHandler:
                     content_type = part.get_content_type()
                     content_disposition = str(part.get("Content-Disposition"))
                     
-                    # Pomiń załączniki
                     if "attachment" in content_disposition:
                         continue
                         
@@ -409,13 +359,11 @@ class EmailHandler:
                                 try:
                                     body += payload.decode(charset, errors="replace")
                                 except (LookupError, UnicodeDecodeError):
-                                    # Jeśli podany charset jest błędny, próbuj standardowych
                                     try:
                                         body += payload.decode("utf-8")
                                     except:
                                         body += payload.decode("iso-8859-2", errors="replace")
                             else:
-                                # Brak informacji o kodowaniu - zgaduj
                                 try:
                                     body += payload.decode("utf-8")
                                 except:
@@ -426,7 +374,6 @@ class EmailHandler:
                         except Exception as e:
                             logging.warning(f"Błąd dekodowania części maila: {e}")
             else:
-                # Nie jest multipart (pojedyncza wiadomość)
                 payload = email_message.get_payload(decode=True)
                 charset = email_message.get_content_charset()
                 
@@ -450,46 +397,22 @@ class EmailHandler:
         return body
     
     def extract_email_date(self, email_message):
-        """
-        Wyciąga datę z nagłówka emaila i zwraca w formacie string
-        
-        Args:
-            email_message: Obiekt email message
-            
-        Returns:
-            str: Data w formacie 'YYYY-MM-DD HH:MM:SS' lub None
-        """
+        """Wyciąga datę z nagłówka emaila"""
         try:
             date_header = email_message.get('Date')
             if date_header:
-                # Parsuj datę z nagłówka
-                
                 dt_with_tz = parsedate_to_datetime(date_header)
-                
-                # Konwertuj do lokalnej strefy czasowej
                 dt_local = dt_with_tz.astimezone(self.local_tz)
-                
-                # Zwróć jako string
                 return dt_local.strftime('%Y-%m-%d %H:%M:%S')
             else:
                 logging.warning("Brak nagłówka Date w emailu")
                 return None
-                
         except Exception as e:
             logging.error(f"Błąd podczas wyciągania daty z emaila: {e}")
             return None
     
     def should_update_based_on_date(self, new_email_date, existing_email_date):
-        """
-        Sprawdza czy należy zaktualizować dane na podstawie porównania dat
-        
-        Args:
-            new_email_date: Data nowego emaila (string)
-            existing_email_date: Data istniejącego emaila w arkuszu (string)
-            
-        Returns:
-            bool: True jeśli należy zaktualizować, False w przeciwnym razie
-        """
+        """Sprawdza czy należy zaktualizować dane na podstawie porównania dat"""
         try:
             if not new_email_date:
                 logging.warning("Brak daty nowego emaila - pomijam aktualizację")
@@ -499,12 +422,14 @@ class EmailHandler:
                 logging.info("Brak daty w arkuszu - aktualizuję")
                 return True
             
-            # Konwertuj stringi na datetime
-            new_dt = datetime.strptime(new_email_date, '%Y-%m-%d %H:%M:%S')
-            existing_dt = datetime.strptime(existing_email_date, '%Y-%m-%d %H:%M:%S')
-            
-            # Aktualizuj tylko jeśli nowy email jest nowszy
-            should_update = new_dt > existing_dt
+            # ✅ POPRAWKA 3: Zabezpieczenie przed błędem formatu daty
+            try:
+                new_dt = datetime.strptime(new_email_date, '%Y-%m-%d %H:%M:%S')
+                existing_dt = datetime.strptime(existing_email_date, '%Y-%m-%d %H:%M:%S')
+                should_update = new_dt > existing_dt
+            except ValueError:
+                logging.warning(f"Błąd formatu daty przy porównaniu: {new_email_date} vs {existing_email_date}. Aktualizuję dla bezpieczeństwa.")
+                return True
             
             if should_update:
                 logging.info(f"Nowy email ({new_email_date}) jest nowszy niż istniejący ({existing_email_date}) - aktualizuję")
@@ -515,104 +440,79 @@ class EmailHandler:
             
         except Exception as e:
             logging.error(f"Błąd podczas porównywania dat: {e}")
-            # W przypadku błędu, aktualizuj żeby nie blokować procesu
             return True
 
     def process_emails(self, sheets_handler=None):
-        """
-        Przetwarzanie nowych e-maili z uwzględnieniem trybu CONFIG/ACCOUNTS.
-        """
-        import config
-        
-        # 1. Pobierz wszystkie dostępne konfiguracje z pliku
+        """Przetwarzanie nowych e-maili"""
         all_configs = config.ALL_EMAIL_CONFIGS
         configs_to_check = []
 
-        # 2. Sprawdź tryb działania
         mode = getattr(config, 'EMAIL_TRACKING_MODE', 'CONFIG')
 
         if mode == 'ACCOUNTS' and sheets_handler:
             logging.info("🔄 Tryb pracy: ACCOUNTS (Pobieranie emaili z arkusza Google Sheets)")
-            
-            # ✅ NOWA FUNKCJA - zwraca pełne konfiguracje z hasłami
             from carriers_sheet_handlers import EmailAvailabilityManager
             email_manager = EmailAvailabilityManager(sheets_handler)
             email_configs = email_manager.get_emails_from_accounts_sheet()
             
             if email_configs:
-                # Używamy bezpośrednio konfiguracji z Accounts (zawierają hasła!)
                 configs_to_check = email_configs
                 logging.info(f"✅ Wybrano {len(configs_to_check)} kont do sprawdzenia (z Accounts)")
             else:
                 logging.warning("⚠️ Arkusz Accounts jest pusty lub niedostępny. Fallback do CONFIG.")
                 configs_to_check = all_configs
         else:
-            # Stary tryb lub brak handlera arkusza
             if mode == 'ACCOUNTS' and not sheets_handler:
                  logging.warning("⚠️ Tryb ACCOUNTS wymaga sheets_handler, ale go brak. Używam trybu CONFIG.")
             
             logging.info("🔄 Tryb pracy: CONFIG (Wszystkie maile z pliku)")
             configs_to_check = all_configs
 
-        # ✅ TUTAJ BYŁA ZMIANA - PRZEKAZANIE LISTY KONT:
         emails = self.fetch_new_emails(email_configs_override=configs_to_check)
-        
         processed_data = []
         
-        # ✅ SORTUJ EMAILE PO DATACH (NAJNOWSZE PIERWSZE!)
         emails_with_dates = []
         for email_source, email_msg in emails:
             email_date = self.extract_email_date(email_msg)
             emails_with_dates.append((email_source, email_msg, email_date))
         
-        # Sortuj po datach - NAJNOWSZE PIERWSZE
         emails_with_dates.sort(key=lambda x: x[2] if x[2] else "1900-01-01 00:00:00", reverse=True)
         
         logging.info(f"📧 Przetwarzanie {len(emails_with_dates)} emaili od NAJNOWSZYCH do najstarszych")
         
         for email_source, email_msg, email_date in emails_with_dates:
             try:
-                # ✅ LOGUJ DATĘ NA POCZĄTKU
                 logging.info(f"🕐 Przetwarzanie emaila z daty: {email_date} (najnowsze pierwsze)")
                 
                 try:
                     raw_subject = email_msg.get("Subject", "Brak tematu")
                     subject = self.decode_email_subject(raw_subject)
-                    logging.debug(f"✅ Dekodowano temat w process_emails: {subject}")
                 except Exception as e:
                     logging.warning(f"⚠️ Błąd podczas dekodowania tematu: {e}")
                     subject = str(email_msg.get("Subject", "Brak tematu"))
                 
-                # Pobieranie treści
                 body = self.get_email_body(email_msg)
                 
-                # Wyciągnij adres email z nagłówka To
                 to_header = email_msg.get("To", "")
-                import re
                 email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', to_header)
                 recipient = email_match.group(0) if email_match else None
                 recipient_name = self.extract_recipient_name(to_header)
 
-                # Jeśli nie znaleziono adresu email w To, spróbuj go wyciągnąć z treści
                 if not recipient:
-                    # Szukaj wzorców typu "Witaj, solisqaz user,"
                     name_match = re.search(r"Witaj,\s*([\w\s]+)\s*user", body)
                     if name_match:
                         user_name = name_match.group(1).strip().lower()
                         logging.info(f"Znaleziono nazwę użytkownika w treści: {user_name}")
                         recipient = f"{user_name}@gmail.com"
                     else:
-                        # Ostatecznie użyj domyślnego konta
                         if email_source == "gmail":
                             recipient = config.GMAIL_EMAIL
                         else:
                             recipient = config.INTERIA_EMAIL
                         logging.info(f"Użyto domyślnego adresu: {recipient}")
 
-                # Pozyskanie ustandaryzowanej nazwy użytkownika (bez hardcodowania)
                 user_key = None
                 if recipient:
-                    # Użyj części przed @ jako klucza użytkownika
                     user_key = recipient.split('@')[0].lower()
                     logging.info(f"Użyto klucza użytkownika: {user_key}")
 
@@ -620,25 +520,20 @@ class EmailHandler:
                     logging.warning("Brak daty w nagłówku emaila - pomijam")
                     continue  
                     
-                # ✅ LOGUJ DANE PRZED ANALIZĄ
                 logging.info(f"📧 Analiza NAJNOWSZEGO: {email_date} | {user_key} | {subject[:30]}...")
                 
-                # DODAJ DATĘ DO ANALIZY
                 processed = self.analyze_email(
                     subject, body, recipient, email_source, 
                     recipient_name, email_message=email_msg, email_date=email_date
                 )
                 
                 if processed:
-                    # DODAJ DATĘ EMAILA DO WYNIKÓW
                     processed["email_date"] = email_date
                     processed["user_key"] = user_key
                     processed_data.append(processed)
                     
                     logging.info(f"✅ Przetworzono NAJNOWSZY email z {email_date}: {subject[:50]}")
                     
-                    # ✅ OPCJONALNE: PRZERWIJ PO PIERWSZYM PRZETWORZONYM EMAILU DLA UŻYTKOWNIKA
-                    # Jeśli chcesz tylko najnowszy email dla każdego użytkownika
                     processed_users = set()
                     if user_key not in processed_users:
                         processed_users.add(user_key)
@@ -657,17 +552,14 @@ class EmailHandler:
 
     def extract_recipient_name(self, header):
         """Wyciąga nazwę odbiorcy z nagłówka To/From"""
-        # Wzorzec dla formatu "Imię Nazwisko <email@domain.com>"
         name_pattern = re.search(r'"?([^"<]+)"?\s*<', header)
         if name_pattern:
             return name_pattern.group(1).strip()
         return None
 
-
     def analyze_email(self, subject, body, recipient, email_source, recipient_name=None, email_message=None, email_date=None, force_process=False):
         """Analiza treści e-maila z priorytetem dla AI jeśli włączone"""
         
-        # Podstawowe dane dla każdego maila
         data = {
             "email": recipient,
             "email_source": email_source,
@@ -693,15 +585,12 @@ class EmailHandler:
             "email_date": email_date                       
         }
         
-        import config
         use_ai = getattr(config, 'USE_OPENAI_API', False) 
         
-        # Sprawdź wszystkie handlery
         for handler in self.data_handlers:
             if handler.can_handle(subject, body):
                 logging.info(f"Wykryto email obsługiwany przez {handler.name}")
                 
-                # --- LOGIKA SPRAWDZANIA DATY ---
                 if email_date and not force_process:
                     user_key = recipient.split('@')[0].lower() if recipient and '@' in recipient else None
                     if user_key:
@@ -717,9 +606,7 @@ class EmailHandler:
                      if user_key:
                          self._update_user_last_email_date(user_key, email_date)
 
-                # ============================================================
-                # 1. PRIORYTET: AI (Jeśli włączone w configu)
-                # ============================================================
+                # 1. PRIORYTET: AI
                 if use_ai:
                     logging.info(f"🤖 Uruchamiam analizę AI dla {handler.name} (Priorytet AI)...")
                     try:
@@ -733,12 +620,8 @@ class EmailHandler:
                             return {**data, **openai_data}
                     except Exception as e:
                         logging.error(f"❌ Błąd AI: {e}. Przełączam na tryb awaryjny (Regex).")
-                        # Jeśli AI padnie, kod pójdzie dalej do Regexów
 
-                # ============================================================
                 # 2. SZYBKI REGEX (Tylko statusy z tematu)
-                # Uruchamia się tylko gdy AI wyłączone lub AI zawiodło
-                # ============================================================
                 result = handler.parse_delivery_status(subject, recipient, body, handler.name)
                 if result:
                     logging.info(f"⚡ Szybki Regex znalazł status: {result.get('status')}")
@@ -749,9 +632,7 @@ class EmailHandler:
                     if result:
                         return {**data, **result}
                 
-                # ============================================================
                 # 3. ZAAWANSOWANY REGEX (Pełna analiza treści)
-                # ============================================================
                 logging.info(f"🔍 Uruchamiam handler.process (Pełny Regex) dla {handler.name}")
                 try:
                     processed_data = handler.process(subject, body, recipient, email_source, recipient_name, email_message)
@@ -768,20 +649,11 @@ class EmailHandler:
         return None
 
     def _get_user_last_email_date(self, user_key):
-        """
-        Zwraca datę ostatniego emaila dla użytkownika z jego zamówień/paczek
-        
-        Args:
-            user_key: Klucz użytkownika (część przed @ w emailu)
-            
-        Returns:
-            str: Data ostatniego emaila w formacie 'YYYY-MM-DD HH:MM:SS' lub None
-        """
+        """Zwraca datę ostatniego emaila dla użytkownika z jego zamówień/paczek"""
         try:
             if not user_key:
                 return None
                 
-            # Sprawdź czy użytkownik istnieje w mapowaniach
             if user_key not in self.user_mappings:
                 logging.info(f"Użytkownik {user_key} nie istnieje w mapowaniach - pierwsza aktualizacja")
                 return None
@@ -789,7 +661,6 @@ class EmailHandler:
             user_data = self.user_mappings[user_key]
             last_email_date = None
             
-            # Sprawdź czy użytkownik ma zapisaną datę ostatniego emaila
             if "last_email_date" in user_data:
                 last_email_date = user_data["last_email_date"]
                 logging.info(f"Znaleziono ostatnią datę emaila dla {user_key}: {last_email_date}")
@@ -803,18 +674,11 @@ class EmailHandler:
             return None
 
     def _update_user_last_email_date(self, user_key, email_date):
-        """
-        Aktualizuje datę ostatniego emaila dla użytkownika
-        
-        Args:
-            user_key: Klucz użytkownika
-            email_date: Data emaila do zapisania
-        """
+        """Aktualizuje datę ostatniego emaila dla użytkownika"""
         try:
             if not user_key or not email_date:
                 return
                 
-            # Upewnij się że użytkownik istnieje w mapowaniach
             if user_key not in self.user_mappings:
                 self.user_mappings[user_key] = {
                     "order_numbers": [], 
@@ -822,32 +686,19 @@ class EmailHandler:
                     "last_email_date": None
                 }
             
-            # Aktualizuj datę ostatniego emaila
             self.user_mappings[user_key]["last_email_date"] = email_date
             
             logging.info(f"Zaktualizowano datę ostatniego emaila dla {user_key}: {email_date}")
-            
-            # Zapisz do pliku
             self._save_mappings()
             
         except Exception as e:
             logging.error(f"Błąd podczas zapisywania daty emaila użytkownika {user_key}: {e}")
 
-        
     def connect_to_email_account(self, email_config):
-            """
-            Łączy się z kontem email i zwraca klienta IMAP
-            
-            Args:
-                email_config: Konfiguracja konta email
-                
-            Returns:
-                imaplib.IMAP4_SSL: Klient IMAP lub None w przypadku błędu
-            """
+            """Łączy się z kontem email i zwraca klienta IMAP"""
             try:
                 source = email_config.get('source', 'unknown')
                 
-                # Pobierz informacje o serwerze z email_sources
                 server_info = self.email_sources.get(source, {})
                 
                 if not server_info:
@@ -861,17 +712,9 @@ class EmailHandler:
                 
                 logging.info(f"🔗 Łączenie z {imap_server}:{port} dla {email_addr}")
                 
-                # Ustaw timeout dla różnych dostawców
-                timeout_settings = {
-                    'o2': 60,
-                    'interia': 45,
-                    'gmail': 30
-                }
+                timeout_settings = {'o2': 60, 'interia': 45, 'gmail': 30}
                 timeout = timeout_settings.get(source, 30)
                 
-                #logging.info(f"DEBUG LOGIN: Próba logowania na {email_addr} hasłem: {password}")
-
-                # Połączenie z serwerem z timeout
                 client = imaplib.IMAP4_SSL(imap_server, port, timeout=timeout)
                 client.login(email_addr.lower(), password)
                 
@@ -887,67 +730,9 @@ class EmailHandler:
             except Exception as e:
                 logging.error(f"❌ Błąd ogólny dla {source}: {e}")
                 return None
-    
-    def get_unread_emails_in_date_range(self, account_config, days_back=14):
-        """
-        Pobiera NIEPRZECZYTANE emaile z określonego zakresu dat
-        """
-        try:
-            # ✅ OBLICZ DATĘ GRANICZNĄ
-            from datetime import datetime, timedelta
-            cutoff_date = datetime.now() - timedelta(days=days_back)
-            date_string = cutoff_date.strftime('%d-%b-%Y')  # Format: "15-May-2025"
-            
-            logging.info(f"📅 Szukanie NIEPRZECZYTANYCH emaili od {date_string} ({days_back} dni wstecz)")
-            
-            # ✅ KOMBINUJ KRYTERIA: UNSEEN + SINCE (NIEPRZECZYTANE Z OSTATNICH X DNI)
-            if account_config['email_source'] == 'o2':
-                # Dla O2 - specjalne ograniczenia
-                max_emails = EMAIL_CHECK_SETTINGS.get('o2_email_limit', 50)
-                search_criteria = f'(UNSEEN SINCE "{date_string}")'
-                logging.info(f"🔍 O2: Szukanie NIEPRZECZYTANYCH emaili od {date_string} (limit: {max_emails})")
-            else:
-                # Dla innych kont
-                max_emails = EMAIL_CHECK_SETTINGS.get('max_emails_per_account', 100)
-                search_criteria = f'(UNSEEN SINCE "{date_string}")'
-                logging.info(f"🔍 {account_config['email_source']}: Szukanie NIEPRZECZYTANYCH emaili od {date_string}")
-            
-            # ✅ WYSZUKAJ EMAILE (UNSEEN + SINCE = NIEPRZECZYTANE Z ZAKRESU DAT)
-            status, message_numbers = self.mail.search(None, search_criteria)
-            
-            if status != 'OK':
-                logging.error(f"❌ Błąd wyszukiwania emaili: {status}")
-                return []
-            
-            message_ids = message_numbers[0].split()
-            total_found = len(message_ids)
-            
-            if total_found == 0:
-                logging.info(f"📭 Brak nieprzeczytanych emaili od {date_string}")
-                return []
-            
-            # ✅ OGRANICZ DO NAJNOWSZYCH EMAILI
-            if total_found > max_emails:
-                message_ids = message_ids[-max_emails:]  # Najnowsze emaile
-                logging.info(f"📧 Ograniczenie do {max_emails} najnowszych z {total_found} nieprzeczytanych")
-            
-            logging.info(f"📧 Znaleziono {len(message_ids)} NIEPRZECZYTANYCH emaili z ostatnich {days_back} dni")
-            return message_ids
-            
-        except Exception as e:
-            logging.error(f"❌ Błąd podczas pobierania emaili: {e}")
-            return []
         
     def decode_email_subject(self, subject):
-        """
-        Dekoduje temat emaila z różnych encodingów
-        
-        Args:
-            subject (str): Surowy temat emaila
-            
-        Returns:
-            str: Dekodowany temat
-        """
+        """Dekoduje temat emaila z różnych encodingów"""
         if not subject or subject == 'Brak tematu':
             return subject or 'Brak tematu'
         
@@ -962,7 +747,6 @@ class EmailHandler:
                             decoded_part = part.decode(encoding)
                             decoded_parts.append(decoded_part)
                         except (UnicodeDecodeError, LookupError):
-                            # Fallback encodings
                             for fallback_encoding in ['iso-8859-2', 'iso-8859-1', 'utf-8']:
                                 try:
                                     decoded_part = part.decode(fallback_encoding)
@@ -974,7 +758,6 @@ class EmailHandler:
                                 decoded_part = part.decode('utf-8', errors='ignore')
                                 decoded_parts.append(decoded_part)
                     else:
-                        # Brak encoding - użyj utf-8
                         try:
                             decoded_part = part.decode('utf-8')
                             decoded_parts.append(decoded_part)
@@ -982,7 +765,6 @@ class EmailHandler:
                             decoded_part = part.decode('utf-8', errors='ignore')
                             decoded_parts.append(decoded_part)
                 else:
-                    # Już jest stringiem
                     decoded_parts.append(str(part))
             
             return ''.join(decoded_parts)
@@ -996,14 +778,9 @@ class EmailHandler:
         Pobiera historię maili dla konkretnego konta.
         Jeśli nie znajdzie configu, używa danych domyślnych (FALLBACK).
         """
-        import config
-        from datetime import datetime, timedelta
-        import email
-        
         target_email = target_email.strip().lower()
         all_emails = []
         
-        # 1. Próba znalezienia dedykowanej konfiguracji w config.py
         found_config = None
         if hasattr(config, 'ALL_EMAIL_CONFIGS'):
             for cfg in config.ALL_EMAIL_CONFIGS:
@@ -1011,32 +788,28 @@ class EmailHandler:
                     found_config = cfg
                     break
         
-        # --- SEKCJA FALLBACK (To dodałem) ---
+        # --- SEKCJA FALLBACK ---
         if not found_config:
             logging.warning(f"⚠️ Nie znaleziono jawnej konfiguracji dla {target_email} w config.py")
             
-            # Sprawdzamy czy istnieje hasło domyślne
             if hasattr(config, 'DEFAULT_EMAIL_PASSWORD') and config.DEFAULT_EMAIL_PASSWORD:
                 logging.info(f"🔧 Uruchamiam FALLBACK: Używam domyślnego hasła i serwera Interia.")
                 found_config = {
                     'email': target_email,
-                    'password': config.DEFAULT_EMAIL_PASSWORD, # Tu bierze hasło z configu
-                    'server': 'poczta.interia.pl',             # Domyślny serwer Interii
-                    'source': 'interia'                        # Domyślne źródło
+                    'password': config.DEFAULT_EMAIL_PASSWORD,
+                    'server': 'poczta.interia.pl',
+                    'source': 'interia'
                 }
             else:
                 logging.error(f"❌ Brak konfiguracji ORAZ brak 'DEFAULT_EMAIL_PASSWORD' w config.py dla {target_email}")
                 return []
-        # ------------------------------------
 
-        # 2. Oblicz datę wstecz
         cutoff_date = datetime.now() - timedelta(days=days_back)
         date_string = cutoff_date.strftime('%d-%b-%Y')
         
         source = found_config.get('source', 'unknown')
         logging.info(f"🔄 REPROCESS: Łączenie z {target_email} ({source})...")
         
-        # 3. Logowanie (użyje znalezionego configu LUB tego stworzonego w fallbacku)
         client = self.connect_to_email_account(found_config)
         if not client:
             return []
@@ -1044,7 +817,6 @@ class EmailHandler:
         try:
             client.select("INBOX")
             
-            # Szukamy wiadomości od daty
             search_criteria = f'(SINCE "{date_string}")'
             logging.info(f"📅 Kryteria reprocess: {search_criteria}")
             
