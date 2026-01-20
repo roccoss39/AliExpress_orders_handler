@@ -5,13 +5,13 @@ import signal
 import json
 import os
 import threading
-import requests  # ✅ DODAJ TEN IMPORT NA GÓRĘ
+import requests
 from datetime import datetime
 from email_handler import EmailHandler
 from sheets_handler import SheetsHandler
 from notification import send_pickup_notification
 import config
-from carriers_sheet_handlers import EmailAvailabilityManager  # ✅ DODAJ IMPORT
+from carriers_sheet_handlers import EmailAvailabilityManager
 from log_cleaner import cleanup_old_logs, auto_cleanup_logs, get_log_info
 import traceback
 import psutil
@@ -41,10 +41,11 @@ def load_mappings_from_sheet(sheets_handler, email_handler):
         
         # Pomijamy nagłówek
         for row in all_values[1:]:
-            if len(row) >= 4:  # Upewnij się, że mamy wystarczająco kolumn
-                email = row[0]  # Email (kolumna A)
-                order_number = row[2]  # Nr order (kolumna C)
-                package_number = row[3]  # Package number (kolumna D)
+            # ✅ ZMIANA: Dostosowanie do nowych kolumn (M=12, O=14)
+            if len(row) >= 15:  
+                email = row[0]          # Kolumna A (0)
+                order_number = row[12]  # Kolumna M (12) - Nr Zamówienia
+                package_number = row[14] # Kolumna O (14) - Nr Paczki
                 
                 # Mapujemy email do numeru zamówienia i paczki
                 if email and (order_number or package_number):
@@ -175,7 +176,6 @@ def main_loop():
                         
                         elif order_data["status"] == "pickup":
                             logging.info(f"Aktualizacja paczki gotowej do odbioru: {order_data.get('package_number')}")
-                            # ZMIANA: Użyj nowej funkcji zamiast update_pickup
                             if sheets_handler.update_pickup_status(order_data):
                                 # Wysyłanie powiadomienia e-mail
                                 send_pickup_notification(order_data)
@@ -194,8 +194,8 @@ def main_loop():
                             
                             # Jeśli znaleziono wiersz, aktualizujemy numer paczki
                             if row:
-                                # Aktualizuj numer paczki w kolumnie D
-                                sheets_handler.worksheet.update_cell(row, 4, order_data["package_number"])
+                                # ✅ ZMIANA: Aktualizuj numer paczki w kolumnie O (15)
+                                sheets_handler.worksheet.update_cell(row, 15, order_data["package_number"])
                                 logging.info(f"Zaktualizowano numer paczki dla zamówienia w wierszu {row}")
                             else:
                                 logging.warning(f"Nie znaleziono pasującego zamówienia dla paczki {order_data.get('package_number')}")
@@ -212,8 +212,8 @@ def main_loop():
                                 row = None
                                 package_number = order_data.get("package_number")
                                 if package_number:
-                                    # Szukaj wiersza po numerze paczki (kolumna D)
-                                    cell = sheets_handler.worksheet.find(package_number, in_column=4)
+                                    # ✅ ZMIANA: Szukaj wiersza po numerze paczki (kolumna O = 15)
+                                    cell = sheets_handler.worksheet.find(package_number, in_column=15)
                                     if cell:
                                         row = cell.row
                                         logging.info(f"Znaleziono przesyłkę {package_number} w wierszu {row}")
@@ -233,7 +233,6 @@ def main_loop():
                                         else:
                                             # Utwórz nowy wiersz
                                             logging.info(f"Tworzenie nowego wiersza dla przesyłki {package_number}")
-                                            # Użyj metody create_shipment_row z klasy DHLCarrier
                                             carrier.create_shipment_row(order_data)
                                     else:
                                         logging.warning(f"Brak user_key dla przesyłki {package_number}")
@@ -414,8 +413,8 @@ def test_single_run():
             
             # Jeśli znaleziono wiersz, aktualizujemy numer paczki
             if row:
-                # Aktualizuj numer paczki w kolumnie D
-                sheets_handler.worksheet.update_cell(row, 4, order_data["package_number"])
+                # ✅ ZMIANA: Aktualizuj numer paczki w kolumnie O (15)
+                sheets_handler.worksheet.update_cell(row, 15, order_data["package_number"])
                 logging.info(f"Zaktualizowano numer paczki dla zamówienia w wierszu {row}")
             else:
                 logging.warning(f"Nie znaleziono pasującego zamówienia dla paczki {order_data.get('package_number')}")
@@ -452,9 +451,9 @@ def print_mappings(sheets_handler, email_handler):
         for i, row in enumerate(values):
             if i == 0:  # Nagłówek
                 continue
-            if len(row) >= 8:  # Upewnij się, że wiersz ma wystarczająco dużo kolumn
+            if len(row) >= 13:  # ✅ Upewnij się, że wiersz ma wystarczająco dużo kolumn
                 email = row[0] if row[0] else "brak"
-                order = row[7] if row[7] else "brak"
+                order = row[12] if row[12] else "brak" # ✅ Kolumna M (12)
                 print(f"  Wiersz {i+1}: Email: {email}, Zamówienie: {order}")
     except Exception as e:
         print(f"Błąd podczas pobierania danych z arkusza: {e}")

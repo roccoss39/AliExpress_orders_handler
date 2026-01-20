@@ -4,6 +4,7 @@ import config
 import logging
 import re
 import time
+from datetime import datetime, timedelta  # ✅ DODANO IMPORT
 from carriers_sheet_handlers import InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier
 
 class SheetsHandler:
@@ -157,10 +158,10 @@ class SheetsHandler:
             return None
         
         try:
-            cell = self.worksheet.find(order_number, in_column=8)
-            if cell:
-                logging.info(f"Znaleziono zamówienie {order_number} w wierszu {cell.row}")
-                return cell.row
+            # Szukaj w kolumnie M (indeks 13, ale w find używamy 1-based index jeśli gspread < 6.0,
+            # w nowych wersjach find szuka w całym zakresie. 
+            # Domyślnie w kodzie 'create_row' numer zamówienia jest w kolumnie M (13) lub wcześniej w H (8).
+            # Spróbujmy znaleźć gdziekolwiek.
             
             cells = self.worksheet.findall(order_number)
             if cells:
@@ -184,10 +185,6 @@ class SheetsHandler:
             return None
         
         try:
-            cell = self.worksheet.find(package_number, in_column=8)
-            if cell:
-                return cell.row
-                
             cells = self.worksheet.findall(package_number)
             if cells and len(cells) > 0:
                 return cells[0].row
@@ -226,35 +223,45 @@ class SheetsHandler:
                 
                 if order_data.get("item_link"):
                     normal_link = order_data.get("item_link")
-                    self.worksheet.update_cell(row, 11, normal_link)
+                    # ✅ ZMIANA: Link w kolumnie P (16), nie K (11)
+                    self.worksheet.update_cell(row, 16, normal_link)
                     
                 return True
             
             logging.info(f"Nie znaleziono zamówienia {order_number} w arkuszu - tworzę nowy wiersz")
             
+            # ✅ ZMIANA: Obsługa daty zamówienia
+            email_date_str = order_data.get("email_date", datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            est_delivery = ""
+            try:
+                # Prosta próba obliczenia +10 dni
+                dt_obj = datetime.strptime(email_date_str[:10], '%Y-%m-%d')
+                est_delivery = (dt_obj + timedelta(days=10)).strftime('%Y-%m-%d')
+            except: pass
+
+            # ✅ ZMIANA: Struktura 16 kolumn
             row_data = [
-                order_data.get("customer_name", order_data.get("email", "")),
-                order_data.get("product_name", ""),
-                order_data.get("delivery_address", ""),
-                order_data.get("phone_number", ""),
-                "", 
-                order_data.get("delivery_date", ""),
-                "", 
-                order_data.get("order_number", ""),
-                "Zamówiono",
-                order_data.get("customer_name", order_data.get("email", ""))
+                order_data.get("customer_name", order_data.get("email", "")), # A
+                order_data.get("product_name", ""),                           # B
+                order_data.get("delivery_address", ""),                       # C
+                order_data.get("phone_number", ""),                           # D
+                "",                                                           # E
+                order_data.get("delivery_date", ""),                          # F
+                "",                                                           # G
+                email_date_str,                                               # H
+                "Zamówienie potwierdzone",                                    # I
+                email_date_str,                                               # J (Data zam)
+                est_delivery,                                                 # K (Est)
+                "",                                                           # L
+                order_data.get("order_number", ""),                           # M
+                "",                                                           # N
+                "",                                                           # O
+                order_data.get("item_link", "")                               # P (Link)
             ]
             
-            values = self.worksheet.get_all_values()
-            next_row = len(values) + 1
-            cell_range = f"A{next_row}:J{next_row}"
-            self.worksheet.update(cell_range, [row_data])
+            self.worksheet.append_row(row_data)
             
-            if order_data.get("item_link"):
-                normal_link = order_data.get("item_link")
-                self.worksheet.update_cell(next_row, 11, normal_link)
-            
-            logging.info(f"Utworzono nowy wiersz dla zamówienia {order_number} w wierszu {next_row}")
+            logging.info(f"Utworzono nowy wiersz dla zamówienia {order_number}")
             return True
         except Exception as e:
             logging.error(f"Błąd podczas aktualizacji potwierdzonego zamówienia: {e}")
@@ -275,8 +282,8 @@ class SheetsHandler:
                 row = self.find_package_row(package_number)
             if not row and order_number:
                 try:
-                    cell = self.worksheet.find(order_number, in_column=8)
-                    if cell: row = cell.row
+                    cells = self.worksheet.findall(order_number)
+                    if cells: row = cells[0].row
                 except: pass
             if not row and user_key:
                 user_rows = self.find_user_rows(user_key)
@@ -336,7 +343,7 @@ class SheetsHandler:
             row = self.find_order_row(order_data["order_number"])
             
             if row:
-                self.worksheet.format(f"A{row}:I{row}", {
+                self.worksheet.format(f"A{row}:P{row}", { # Zakres do P
                     "backgroundColor": config.COLORS["canceled"]
                 })
                 
@@ -427,28 +434,33 @@ class SheetsHandler:
                 else:
                     qr_data = order_data["qr_code"]
 
+            # ✅ ZMIANA: 16 kolumn, daty
+            email_date_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
             row_data = [
-                email,
-                "Nieznany",
-                order_data.get("pickup_location", ""),
-                order_data.get("phone_number", ""),
-                order_data.get("pickup_code", ""),
-                order_data.get("pickup_deadline", ""),
-                available_hours,
-                "",
-                "Gotowe do odbioru",
-                email,
-                "",
-                qr_data
+                email,                                          # A
+                "Nieznany",                                     # B
+                order_data.get("pickup_location", ""),          # C
+                order_data.get("phone_number", ""),             # D
+                order_data.get("pickup_code", ""),              # E
+                order_data.get("pickup_deadline", ""),          # F
+                available_hours,                                # G
+                email_date_str,                                 # H
+                "Gotowe do odbioru",                            # I
+                email_date_str,                                 # J (Data)
+                "",                                             # K (Est)
+                qr_data,                                        # L
+                "",                                             # M
+                "",                                             # N
+                "",                                             # O
+                ""                                              # P
             ]
             
-            values = self.worksheet.get_all_values()
-            next_row = len(values) + 1
-            cell_range = f"A{next_row}:L{next_row}"
-            self.worksheet.update(cell_range, [row_data])
+            self.worksheet.append_row(row_data)
+            next_row = len(self.worksheet.get_all_values())
             
             try:
-                self.worksheet.format(f"A{next_row}:J{next_row}", {
+                self.worksheet.format(f"A{next_row}:P{next_row}", {
                     "backgroundColor": {"red": 1.0, "green": 0.95, "blue": 0.8}
                 })
             except Exception as format_error:
@@ -461,94 +473,95 @@ class SheetsHandler:
             return False
 
     def _direct_create_row(self, order_data):
-        """Bezpośrednie tworzenie wiersza z obsługą WSZYSTKICH kolumn + Auto-archiwizacja"""
+        """
+        Tworzy nowy wiersz bezpośrednio w arkuszu (Fallback).
+        Zaktualizowana wersja obsługująca 16 kolumn (A-P) i daty.
+        """
         try:
-            # 1. Znajdź pierwszy wolny wiersz
-            emails = self.worksheet.col_values(1)
-            first_empty_row = len(emails) + 1
-            if first_empty_row < 2: first_empty_row = 2
-
-            logging.info(f"Tworzę nowy wiersz awaryjnie w pozycji {first_empty_row}")
+            # Pobierz dane podstawowe
+            email = order_data.get("email") or f"{order_data.get('user_key', 'unknown')}@gmail.com"
+            order_num = order_data.get("order_number", "")
+            pkg_num = order_data.get("package_number", "")
+            status = order_data.get("status", "unknown")
             
-            # 2. Przygotuj dane
-            row_data = [""] * 15
-            row_data[0] = order_data.get('email', '') or ""
-            row_data[1] = order_data.get('product_name', '') or ""
-            row_data[2] = order_data.get('delivery_address', '') or ""
-            row_data[7] = order_data.get('email_date', '') or ""
+            # --- DATY ---
+            # 1. Data zamówienia (z maila lub dzisiaj)
+            email_date_str = order_data.get("email_date", "")
+            if not email_date_str:
+                email_date_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            status_map = {
-                "shipment_sent": "Przesyłka nadana",
-                "pickup": "Gotowa do odbioru",
-                "delivered": "Dostarczona",
-                "transit": "W transporcie",
-                "confirmed": "Potwierdzone",
-                "closed": "Zamknięte"
-            }
-            status_key = order_data.get('status', 'unknown')
-            carrier_name = order_data.get('carrier', 'Unknown')
-            row_data[8] = f"{status_map.get(status_key, status_key)} ({carrier_name})" 
-            
-            order_num = order_data.get('order_number')
-            if order_num:
-                row_data[12] = f"'{order_num}" 
-            
-            info_text = order_data.get('info', '') or ""
-            if info_text == row_data[8]: 
-                row_data[13] = ""
-            else:
-                row_data[13] = info_text
-
-            pkg = order_data.get('package_number', '')
-            if pkg: 
-                row_data[14] = f"'{pkg}"
-
-            # 3. Zapisz do arkusza
-            range_name = f"A{first_empty_row}:O{first_empty_row}"
-            self.worksheet.update(range_name=range_name, values=[row_data])
-            
-            logging.info(f"Utworzono awaryjnie wiersz {first_empty_row}")
-
-            # 4. Kolorowanie (Twój istniejący kod)
+            # 2. Przewidywana dostawa (+10 dni)
+            est_delivery = ""
             try:
-                carrier = self.carriers.get(carrier_name)
-                if not carrier: 
-                     from carriers_sheet_handlers import BaseCarrier
-                     carrier = BaseCarrier(self)
-
-                color = carrier.colors.get(status_key, carrier.colors.get('unknown'))
+                # Próbuj parsować datę (różne formaty)
+                dt_obj = None
+                if len(email_date_str) > 10:
+                    dt_obj = datetime.strptime(email_date_str, '%Y-%m-%d %H:%M:%S')
+                else:
+                    dt_obj = datetime.strptime(email_date_str, '%Y-%m-%d')
                 
-                if color:
-                    self.worksheet.format(f"A{first_empty_row}:O{first_empty_row}", {
-                        "backgroundColor": color,
-                        "textFormat": {"foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0}}
-                    })
+                if dt_obj:
+                    est_delivery = (dt_obj + timedelta(days=10)).strftime('%Y-%m-%d')
             except Exception as e:
-                logging.warning(f"⚠️ Nie udało się pokolorować wiersza {first_empty_row}: {e}")
+                logging.warning(f"Nie udało się obliczyć daty dostawy w _direct_create_row: {e}")
+
+            # Budujemy wiersz (16 elementów)
+            row_data = [
+                email,                                      # A (0): Email
+                order_data.get("product_name", ""),         # B (1): Nazwa produktu
+                order_data.get("delivery_address", ""),     # C (2): Adres
+                order_data.get("phone_number", ""),         # D (3): Tel
+                order_data.get("pickup_code", ""),          # E (4): Kod odbioru
+                order_data.get("pickup_deadline", ""),      # F (5): Deadline
+                order_data.get("available_hours", ""),      # G (6): Godziny
+                email_date_str,                             # H (7): Data maila
+                f"{status} ({order_data.get('carrier', 'Unknown')})", # I (8): Status
+                email_date_str,                             # J (9): Data zamówienia (NOWA)
+                est_delivery,                               # K (10): Przewidywana dostawa (NOWA)
+                order_data.get("qr_code", ""),              # L (11): QR
+                f"'{order_num}" if order_num else "",       # M (12): Nr zamówienia
+                order_data.get("info", ""),                 # N (13): Info
+                f"'{pkg_num}" if pkg_num else "",           # O (14): Nr paczki
+                order_data.get("item_link", "")             # P (15): Link (NOWA LOKALIZACJA)
+            ]
+            
+            # Dodaj wiersz
+            self.worksheet.append_row(row_data)
+            
+            # Pobierz numer nowo dodanego wiersza
+            new_row_idx = len(self.worksheet.get_all_values())
+            
+            # Formatuj na szaro (neutralny kolor dla direct create)
+            try:
+                self.worksheet.format(f"A{new_row_idx}:P{new_row_idx}", {
+                    "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95}
+                })
+            except: pass
+            
+            logging.info(f"✅ Utworzono wiersz {new_row_idx} (Direct) dla {email}")
 
             # =================================================================
             # 5. ✅ NOWE: AUTOMATYCZNA ARCHIWIZACJA JEŚLI DOSTARCZONA
             # =================================================================
-            if status_key == "delivered":
+            if status == "delivered":
                 logging.info(f"📦 Nowy wiersz ma status 'delivered'. Przenoszę natychmiast do archiwum...")
                 
                 # Przenieś do zakładki Delivered
-                self.move_row_to_delivered(first_empty_row, row_data)
+                self.move_row_to_delivered(new_row_idx, order_data)
                 
-                # Spróbuj wyczyścić mapowanie (jeśli masz podpięty email_handler w SheetsHandler)
+                # Spróbuj wyczyścić mapowanie
                 if hasattr(self, 'email_handler') and self.email_handler:
                     self.email_handler.remove_user_mapping(
                         order_data.get("user_key"),
-                        order_data.get("package_number"),
-                        order_data.get("order_number")
+                        pkg_num,
+                        order_num
                     )
                     logging.info("🧹 Wyczyszczono mapowanie po natychmiastowej archiwizacji.")
-            # =================================================================
 
             return True
             
         except Exception as e:
-            logging.error(f"Błąd _direct_create_row: {e}")
+            logging.error(f"❌ Błąd w _direct_create_row: {e}")
             import traceback
             traceback.print_exc()
             return False
