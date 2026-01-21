@@ -106,5 +106,8 @@ EMAIL_CHECK_SETTINGS = {
     'auto_expunge': True                # Automatycznie zapisuj zmiany
 }
 
-# Reszta konfiguracji...
+# --- TELEGRAM CONFIG ---
+ENABLE_TELEGRAM = True
+TELEGRAM_BOT_TOKEN = "8089722907:AAEg-jBzTottwRqEyY9J32Gkc4LbBNOUfmY"
+TELEGRAM_CHAT_ID = "6713195364"
 

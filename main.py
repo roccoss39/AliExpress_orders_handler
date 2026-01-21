@@ -17,7 +17,7 @@ import traceback
 import psutil
 from rate_limiter import create_api_limiters
 from graceful_shutdown import init_graceful_shutdown, set_handlers, increment_processed_emails, increment_iterations, save_periodic_state, is_shutdown_requested, set_main_loop_running, get_stats
-
+from telegram_notifier import TelegramNotifier  # ✅ NOWOŚĆ: Import Telegrama
 
 # Konfiguracja logowania
 logging.basicConfig(
@@ -29,38 +29,6 @@ logging.basicConfig(
     ]
 )
 logging.getLogger('openai').setLevel(logging.WARNING)
-
-def load_mappings_from_sheet(sheets_handler, email_handler):
-    """Wczytuje mapowania na podstawie danych z arkusza"""
-    if not sheets_handler.connected and not sheets_handler.connect():
-        return
-    
-    try:
-        # Pobierz wszystkie dane
-        all_values = sheets_handler.worksheet.get_all_values()
-        
-        # Pomijamy nagłówek
-        for row in all_values[1:]:
-            # ✅ ZMIANA: Dostosowanie do nowych kolumn (M=12, O=14)
-            if len(row) >= 15:  
-                email = row[0]          # Kolumna A (0)
-                order_number = row[12]  # Kolumna M (12) - Nr Zamówienia
-                package_number = row[14] # Kolumna O (14) - Nr Paczki
-                
-                # Mapujemy email do numeru zamówienia i paczki
-                if email and (order_number or package_number):
-                    if email not in email_handler.user_mappings:
-                        email_handler.user_mappings[email] = {}
-                    
-                    if order_number:
-                        email_handler.user_mappings[email]["order_number"] = order_number
-                    
-                    if package_number:
-                        email_handler.user_mappings[email]["package_number"] = package_number
-        
-        logging.info(f"Wczytano {len(email_handler.user_mappings)} mapowań z arkusza")
-    except Exception as e:
-        logging.error(f"Błąd podczas wczytywania mapowań z arkusza: {e}")
 
 def main_loop():
     """Główna pętla programu"""
@@ -75,6 +43,10 @@ def main_loop():
     # ✅ STWÓRZ RATE LIMITERY
     limiters = create_api_limiters()
     logging.info("🚦 Zainicjalizowano rate limitery")
+
+    # ✅ INICJALIZACJA TELEGRAMA (NOWOŚĆ)
+    telegram = TelegramNotifier()
+    telegram.send_startup_message()
     
     email_handler = EmailHandler()
     sheets_handler = SheetsHandler()
@@ -98,6 +70,7 @@ def main_loop():
         logging.info("🚀 Uruchamianie w trybie CONFIG: Stała lista z pliku")
 
     first_run = True
+    last_duplicate_check = 0  # ✅ Timer do usuwania duplikatów
 
     logging.info("--- Uruchamianie procedury czyszczenia zakończonych zamówień ---")
     sheets_handler.check_and_archive_delivered_orders()
@@ -109,6 +82,12 @@ def main_loop():
             break
             
         try:
+            # ✅ USUWANIE DUPLIKATÓW (Raz na 24h - 86400 sekund)
+            if time.time() - last_duplicate_check > 86400:
+                logging.info("🧹 Uruchamiam dobowe czyszczenie duplikatów...")
+                sheets_handler.remove_duplicates()
+                last_duplicate_check = time.time()
+
             logging.info(f"Sprawdzanie e-maili: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
             # ✅ RATE LIMIT PRZED POŁĄCZENIEM Z SHEETS
@@ -117,15 +96,17 @@ def main_loop():
             # Inicjalizuj połączenie z Google Sheets
             if not sheets_handler.connect():
                 logging.error("Nie można połączyć się z arkuszem Google.")
-                return
+                telegram.send_error_message("Błąd połączenia z Google Sheets API") # 🔔 Telegram
+                time.sleep(300)
+                return # Lub continue, zależnie od strategii
 
             email_availability_manager = EmailAvailabilityManager(sheets_handler)
             
             # ✅ RATE LIMIT PRZED WCZYTANIEM MAPOWAŃ
             limiters.wait_for("sheets_read")
             
-            # Wczytaj istniejące mapowania
-            load_mappings_from_sheet(sheets_handler, email_handler)
+            # Wczytaj i napraw mapowania z arkusza
+            email_handler.sync_mappings_from_sheets(sheets_handler)
             
             # ✅ RATE LIMIT PRZED SPRAWDZANIEM EMAILI
             limiters.wait_for("imap")
@@ -145,6 +126,9 @@ def main_loop():
                     logging.info('🛑 Przerwano przetwarzanie emaili - żądanie zamknięcia')
                     break
                 
+                # ✅ WYSŁANIE POWIADOMIENIA NA TELEGRAM (NOWOŚĆ)
+                telegram.send_new_package_alert(order_data)
+
                 # Pobierz przewoźnika
                 carrier_name = order_data.get("carrier", "InPost")
                 logging.info(f"PRZEWOZNIK TO: {carrier_name}")
@@ -176,6 +160,7 @@ def main_loop():
                         
                         elif order_data["status"] == "pickup":
                             logging.info(f"Aktualizacja paczki gotowej do odbioru: {order_data.get('package_number')}")
+                            # ZMIANA: Użyj nowej funkcji zamiast update_pickup
                             if sheets_handler.update_pickup_status(order_data):
                                 # Wysyłanie powiadomienia e-mail
                                 send_pickup_notification(order_data)
@@ -233,6 +218,7 @@ def main_loop():
                                         else:
                                             # Utwórz nowy wiersz
                                             logging.info(f"Tworzenie nowego wiersza dla przesyłki {package_number}")
+                                            # Użyj metody create_shipment_row z klasy DHLCarrier
                                             carrier.create_shipment_row(order_data)
                                     else:
                                         logging.warning(f"Brak user_key dla przesyłki {package_number}")
@@ -322,8 +308,12 @@ def main_loop():
                 time.sleep(config.CHECK_INTERVAL * 60)
                 
         except Exception as e:
-            logging.error(f"Błąd w głównej pętli: {e}")
+            error_msg = f"Krytyczny błąd w pętli: {str(e)}"
+            logging.error(error_msg)
             logging.error(f"Szczegóły: {traceback.format_exc()}")
+            
+            # ✅ Telegram powiadomienie
+            telegram.send_error_message(f"{str(e)}\n\n{traceback.format_exc()[:200]}")
             
             # ✅ DODAJ TUTAJ TEŻ (nawet przy błędzie)
             increment_iterations()
@@ -342,6 +332,7 @@ def main_loop():
     # ✅ USTAW FLAGĘ ZAKOŃCZENIA DZIAŁANIA
     set_main_loop_running(False)
     logging.info('🏁 Główna pętla zakończona')
+    telegram.send_message("🛑 <b>Bot zakończył pracę.</b>") # 🔔
 
 # Dodaj na końcu pliku main.py
 

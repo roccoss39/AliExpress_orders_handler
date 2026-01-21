@@ -475,25 +475,25 @@ class SheetsHandler:
     def _direct_create_row(self, order_data):
         """
         Tworzy nowy wiersz bezpośrednio w arkuszu (Fallback).
-        Zaktualizowana wersja obsługująca 16 kolumn (A-P) i daty.
+        Zaktualizowana wersja obsługująca 16 kolumn (A-P), daty i kolory statusów.
         """
         try:
+            from datetime import datetime, timedelta
+            
             # Pobierz dane podstawowe
             email = order_data.get("email") or f"{order_data.get('user_key', 'unknown')}@gmail.com"
             order_num = order_data.get("order_number", "")
             pkg_num = order_data.get("package_number", "")
             status = order_data.get("status", "unknown")
+            carrier_name = order_data.get('carrier', 'Unknown')
             
             # --- DATY ---
-            # 1. Data zamówienia (z maila lub dzisiaj)
             email_date_str = order_data.get("email_date", "")
             if not email_date_str:
                 email_date_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            # 2. Przewidywana dostawa (+10 dni)
             est_delivery = ""
             try:
-                # Próbuj parsować datę (różne formaty)
                 dt_obj = None
                 if len(email_date_str) > 10:
                     dt_obj = datetime.strptime(email_date_str, '%Y-%m-%d %H:%M:%S')
@@ -515,14 +515,14 @@ class SheetsHandler:
                 order_data.get("pickup_deadline", ""),      # F (5): Deadline
                 order_data.get("available_hours", ""),      # G (6): Godziny
                 email_date_str,                             # H (7): Data maila
-                f"{status} ({order_data.get('carrier', 'Unknown')})", # I (8): Status
-                email_date_str,                             # J (9): Data zamówienia (NOWA)
-                est_delivery,                               # K (10): Przewidywana dostawa (NOWA)
+                f"{status} ({carrier_name})",               # I (8): Status
+                email_date_str,                             # J (9): Data zamówienia
+                est_delivery,                               # K (10): Przewidywana dostawa
                 order_data.get("qr_code", ""),              # L (11): QR
                 f"'{order_num}" if order_num else "",       # M (12): Nr zamówienia
                 order_data.get("info", ""),                 # N (13): Info
                 f"'{pkg_num}" if pkg_num else "",           # O (14): Nr paczki
-                order_data.get("item_link", "")             # P (15): Link (NOWA LOKALIZACJA)
+                order_data.get("item_link", "")             # P (15): Link
             ]
             
             # Dodaj wiersz
@@ -531,32 +531,36 @@ class SheetsHandler:
             # Pobierz numer nowo dodanego wiersza
             new_row_idx = len(self.worksheet.get_all_values())
             
-            # Formatuj na szaro (neutralny kolor dla direct create)
+            # --- LOGIKA KOLOROWANIA ---
+            # Domyślny kolor: jasny szary
+            bg_color = {"red": 0.95, "green": 0.95, "blue": 0.95}
+            text_color = {"red": 0.0, "green": 0.0, "blue": 0.0}
+
+            # Jeśli status to closed, ustaw intensywny czerwony
+            if status.lower() == "closed":
+                bg_color = {"red": 1.0, "green": 0.2, "blue": 0.2}
+                text_color = {"red": 1.0, "green": 1.0, "blue": 1.0} # Biały tekst dla czytelności na czerwonym
+
             try:
                 self.worksheet.format(f"A{new_row_idx}:P{new_row_idx}", {
-                    "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95}
+                    "backgroundColor": bg_color,
+                    "textFormat": {
+                        "foregroundColor": text_color,
+                        "bold": (status.lower() == "closed") # Pogrubienie dla closed
+                    }
                 })
-            except: pass
+            except Exception as e:
+                logging.warning(f"Błąd formatowania wiersza {new_row_idx}: {e}")
             
-            logging.info(f"✅ Utworzono wiersz {new_row_idx} (Direct) dla {email}")
+            logging.info(f"✅ Utworzono wiersz {new_row_idx} (Direct) dla {email}. Status: {status}")
 
-            # =================================================================
-            # 5. ✅ NOWE: AUTOMATYCZNA ARCHIWIZACJA JEŚLI DOSTARCZONA
-            # =================================================================
+            # --- AUTOMATYCZNA ARCHIWIZACJA ---
             if status == "delivered":
-                logging.info(f"📦 Nowy wiersz ma status 'delivered'. Przenoszę natychmiast do archiwum...")
-                
-                # Przenieś do zakładki Delivered
+                logging.info(f"📦 Nowy wiersz ma status 'delivered'. Przenoszę do archiwum...")
                 self.move_row_to_delivered(new_row_idx, order_data)
                 
-                # Spróbuj wyczyścić mapowanie
                 if hasattr(self, 'email_handler') and self.email_handler:
-                    self.email_handler.remove_user_mapping(
-                        order_data.get("user_key"),
-                        pkg_num,
-                        order_num
-                    )
-                    logging.info("🧹 Wyczyszczono mapowanie po natychmiastowej archiwizacji.")
+                    self.email_handler.remove_user_mapping(order_data.get("user_key"), pkg_num, order_num)
 
             return True
             
@@ -735,3 +739,68 @@ class SheetsHandler:
         except Exception as e:
             # Często arkusz może nie istnieć lub nie mieć wpisu - nie chcemy tu crashować bota
             logging.warning(f"Informacja: Nie udało się usunąć mapowania (może nie istniało): {e}")
+
+            # Wklej to wewnątrz klasy SheetsHandler w sheets_handler.py
+
+    def remove_duplicates(self):
+        """
+        Usuwa zduplikowane wiersze na podstawie numeru zamówienia (M) lub paczki (O).
+        Uruchamiane raz na dobę.
+        """
+        logging.info("🧹 Rozpoczynam sprawdzanie duplikatów w arkuszu...")
+        if not self.connected and not self.connect():
+            return
+
+        try:
+            all_values = self.worksheet.get_all_values()
+            if len(all_values) < 2: return
+
+            seen_orders = set()
+            seen_packages = set()
+            rows_to_delete = []
+
+            # Iterujemy od góry, zapisujemy co widzieliśmy
+            for i, row in enumerate(all_values):
+                if i == 0: continue # Pomiń nagłówek
+                
+                # Indeksy: M=12 (Order), O=14 (Package)
+                # Upewnij się, że wiersz jest wystarczająco długi
+                order_num = row[12].replace("'", "").strip() if len(row) > 12 else ""
+                pkg_num = row[14].replace("'", "").strip() if len(row) > 14 else ""
+                
+                is_duplicate = False
+
+                # Sprawdź Order Number
+                if order_num:
+                    if order_num in seen_orders:
+                        is_duplicate = True
+                        logging.info(f"⚠️ Znaleziono duplikat zamówienia: {order_num} (wiersz {i+1})")
+                    else:
+                        seen_orders.add(order_num)
+
+                # Sprawdź Package Number (jeśli nie oznaczono już jako duplikat)
+                if pkg_num and not is_duplicate:
+                    if pkg_num in seen_packages:
+                        is_duplicate = True
+                        logging.info(f"⚠️ Znaleziono duplikat paczki: {pkg_num} (wiersz {i+1})")
+                    else:
+                        seen_packages.add(pkg_num)
+                
+                if is_duplicate:
+                    rows_to_delete.append(i + 1) # gspread używa indeksów od 1
+
+            # Usuwanie od dołu, żeby nie zmienić numeracji pozostałych
+            if rows_to_delete:
+                logging.info(f"🗑️ Usuwanie {len(rows_to_delete)} zduplikowanych wierszy...")
+                for row_idx in reversed(rows_to_delete):
+                    try:
+                        self.worksheet.delete_rows(row_idx)
+                        time.sleep(1.0) # Limit API
+                    except Exception as e:
+                        logging.error(f"Błąd usuwania wiersza {row_idx}: {e}")
+                logging.info("✅ Duplikaty usunięte.")
+            else:
+                logging.info("✅ Nie znaleziono duplikatów.")
+
+        except Exception as e:
+            logging.error(f"❌ Błąd podczas usuwania duplikatów: {e}")

@@ -648,6 +648,73 @@ class EmailHandler:
         logging.info(f"Mail nie został zakwalifikowany do żadnej kategorii: {subject}")
         return None
 
+    # Wklej to wewnątrz klasy EmailHandler w pliku email_handler.py
+
+    def sync_mappings_from_sheets(self, sheets_handler):
+        """
+        Pobiera dane z arkusza i aktualizuje lokalną bazę mapowań.
+        Naprawia błędy formatowania i duplikaty.
+        """
+        logging.info("📥 Rozpoczynam synchronizację mapowań z arkusza...")
+        
+        # Sprawdzenie połączenia (korzystamy z przekazanego obiektu)
+        if not sheets_handler.connected and not sheets_handler.connect():
+            return
+        
+        try:
+            # Zakładamy kolumny: A=Email (0), M=Order (12), O=Package (14)
+            all_values = sheets_handler.worksheet.get_all_values()
+            updates_count = 0
+            
+            # Pomiń nagłówek
+            for row in all_values[1:]:
+                if len(row) >= 15:  
+                    email_full = row[0].strip()
+                    # Usuń apostrofy, które Excel/Sheets czasem dodają
+                    order_number = row[12].replace("'", "").strip()
+                    package_number = row[14].replace("'", "").strip()
+                    
+                    if email_full and (order_number or package_number):
+                        # 1. Wyciągnij klucz użytkownika (przed @)
+                        if "@" in email_full:
+                            user_key = email_full.split('@')[0].lower()
+                        else:
+                            user_key = email_full.lower()
+                        
+                        # 2. Inicjalizacja struktury
+                        if user_key not in self.user_mappings:
+                            self.user_mappings[user_key] = {
+                                "order_numbers": [],
+                                "package_numbers": [],
+                                "last_email_date": None
+                            }
+                        
+                        user_data = self.user_mappings[user_key]
+                        
+                        # Zabezpieczenie struktury (gdyby istniała, ale była stara/błędna)
+                        if "order_numbers" not in user_data: user_data["order_numbers"] = []
+                        if "package_numbers" not in user_data: user_data["package_numbers"] = []
+                        if "last_email_date" not in user_data: user_data["last_email_date"] = None
+
+                        # 3. Aktualizacja danych (bez duplikatów)
+                        if order_number and order_number not in user_data["order_numbers"]:
+                            user_data["order_numbers"].append(order_number)
+                            updates_count += 1
+                        
+                        if package_number and package_number not in user_data["package_numbers"]:
+                            user_data["package_numbers"].append(package_number)
+                            updates_count += 1
+            
+            if updates_count > 0:
+                self._save_mappings()
+                logging.info(f"✅ Zaktualizowano mapowania z arkusza ({updates_count} nowych wpisów)")
+            else:
+                logging.info("Mapowania lokalne są zgodne z arkuszem.")
+                
+        except Exception as e:
+            logging.error(f"❌ Błąd synchronizacji mapowań z arkusza: {e}")
+            # Nie crashujemy programu, po prostu nie zaktualizowano danych
+            
     def _get_user_last_email_date(self, user_key):
         """Zwraca datę ostatniego emaila dla użytkownika z jego zamówień/paczek"""
         try:
