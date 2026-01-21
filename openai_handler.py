@@ -103,7 +103,7 @@ class OpenAIHandler:
             
             if response is None:
                 logging.warning("Treść maila przekracza limit tokenów. Używam awaryjnej ekstrakcji.")
-                return self._fallback_extraction(subject, email_body, recipient_email)
+                return self.general_fallback_extraction(subject, email_body, recipient_email)
             
             # Obsługa potencjalnych błędów JSON
             try:
@@ -126,7 +126,7 @@ class OpenAIHandler:
             except json.JSONDecodeError as e:
                 logging.error(f"Błąd parsowania JSON: {e}")
                 # Awaryjne wyciąganie danych za pomocą regex
-                data = self._fallback_extraction(subject, email_body, recipient_email)
+                data = self.general_fallback_extraction(subject, email_body, recipient_email)
                 
             return data
             
@@ -146,27 +146,6 @@ class OpenAIHandler:
                 result["item_link"] = link_match.group(1)
                 
             return result
-    
-    def _fallback_extraction(self, subject, email_body, recipient_email=None):
-        """Awaryjne wyciąganie danych za pomocą regex w przypadku błędu API"""
-        result = {"customer_name": recipient_email}
-        
-        # Spróbuj wyciągnąć numer zamówienia z tematu lub treści
-        order_match = re.search(r'[Oo]rder[^\d]*(\d+)|[Zz]amówienie[^\d]*(\d+)', subject + " " + email_body[:1000])
-        if order_match:
-            result["order_number"] = order_match.group(1) or order_match.group(2)
-        
-        # Spróbuj wyciągnąć link do zamówienia
-        link_match = re.search(r'(https://www\.aliexpress\.com/p/order/detail\.html\?orderId=\d+[^\s"<>]+)', email_body)
-        if link_match:
-            result["item_link"] = link_match.group(1)
-            
-        # Spróbuj wyciągnąć nazwę produktu (jeśli występuje po słowie "produkt" lub "item")
-        product_match = re.search(r'(?:[Pp]rodukt|[Ii]tem)[^\n:]*[:]\s*([^\n]+)', email_body)
-        if product_match:
-            result["product_name"] = product_match.group(1).strip()
-            
-        return result
     
     def extract_pickup_notification_data_dpd(self, email_body, subject=None, recipient_email=None):
         """Wyciąga dane z powiadomienia o paczce DPD"""
@@ -238,7 +217,7 @@ class OpenAIHandler:
             
             if response is None:
                 logging.warning("Treść maila przekracza limit tokenów. Używam awaryjnej ekstrakcji.")
-                return self._fallback_extraction(subject, email_body, recipient_email)
+                return self.general_fallback_extraction(subject, email_body, recipient_email)
             
             # Obsługa potencjalnych błędów JSON
             try:
@@ -414,7 +393,7 @@ class OpenAIHandler:
                     logging.info(f"Kompletne dane z awaryjnej ekstrakcji: {json.dumps(result)}")
                     return result
                 else:
-                    return self._fallback_extraction(subject, email_body, recipient_email)
+                    return self.general_fallback_extraction(subject, email_body, recipient_email)
             
             # Wyczyść i sparsuj odpowiedź
             
@@ -1159,12 +1138,6 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                 - Godziny otwarcia paczkomatu
                 """
 
-            # ... (po bloku dla InPost) ...
-            elif carrier_name.lower() == "inpost":
-                 # ... (kod dla InPost) ...
-                 prompt += "..."
-
-            # ✅ DODAJ TO: Obsługa Poczty Polskiej
             elif carrier_name.lower() == "pocztapolska":
                 prompt += """
                 Specyficzne instrukcje dla Poczty Polskiej / Pocztex:
@@ -1203,95 +1176,6 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
         except Exception as e:
             logging.error(f"Błąd podczas ekstrakcji danych z powiadomienia {carrier_name}: {e}")
             return self.general_fallback_extraction(email_body, subject, carrier_name, recipient_email)
-            
-    def _fallback_extraction(self, carrier_name, subject, email_body, recipient_email):
-        """Awaryjna ekstrakcja danych w przypadku błędu API"""
-        result = {
-            "carrier": carrier_name,
-            "email": recipient_email,
-            "customer_name": recipient_email,
-            "user_key": recipient_email.split('@')[0] if recipient_email else None
-        }
-        
-        try:
-            # Ekstrakcja numeru przesyłki/zamówienia w zależności od przewoźnika
-            if carrier_name.lower() == "dpd":
-                # Szukaj formatu DPD (13 cyfr + 1 litera)
-                package_match = re.search(r'(\d{13}[A-Z])', email_body)
-                if package_match:
-                    result["package_number"] = package_match.group(1)
-                    
-                # Szukaj numeru referencyjnego
-                ref_match = re.search(r'Numer\s+referencyjny[^:]*:\s*([A-Z0-9]+)', email_body)
-                if ref_match:
-                    result["reference_number"] = ref_match.group(1)
-                
-            elif carrier_name.lower() == "dhl":
-                # Szukaj formatu DHL (JJD/3S/JVGL + cyfry)
-                jjd_match = re.search(r'(JJD\d+|3S\d+|JVGL\d+)', email_body)
-                if jjd_match:
-                    result["package_number"] = jjd_match.group(1)
-                    
-                # Szukaj PIN-u
-                pin_match = re.search(r'PIN\s+(\d{6})', email_body)
-                if pin_match:
-                    result["pickup_code"] = pin_match.group(1)
-                
-            elif carrier_name.lower() == "inpost":
-                # Szukaj numeru przesyłki InPost
-                package_match = re.search(r'(\d{24})', email_body)
-                if package_match:
-                    result["package_number"] = package_match.group(1)
-                    
-                # Szukaj kodu paczkomatu
-                locker_match = re.search(r'([A-Z]{3}\d{2}[A-Z]{3,4})', email_body)
-                if locker_match:
-                    result["pickup_location_code"] = locker_match.group(1)
-                    
-                # Szukaj kodu odbioru
-                code_match = re.search(r'[Kk]od\s+odbioru[^0-9]*(\d{6})', email_body)
-                if code_match:
-                    result["pickup_code"] = code_match.group(1)
-                
-            elif carrier_name.lower() == "aliexpress":
-                # Szukaj numeru zamówienia
-                order_match = re.search(r'[Oo]rder(?:\s+|\s*[:#]\s*)(\d{10,})|[Zz]amów[^\d]+(\d{10,})', subject + " " + email_body[:1000])
-                if order_match:
-                    result["order_number"] = order_match.group(1) or order_match.group(2)
-                
-                # Szukaj linku do zamówienia
-                link_match = re.search(r'(https://www\.aliexpress\.com/p/order/detail\.html\?orderId=\d+[^\s"<>]+)', email_body)
-                if link_match:
-                    result["item_link"] = link_match.group(1)
-            
-            # Spróbuj wyodrębnić daty
-            date_patterns = [
-                # DD.MM.YYYY lub DD-MM-YYYY
-                r'(\d{2}[.-]\d{2}[.-]\d{4})',
-                # YYYY-MM-DD
-                r'(\d{4}-\d{2}-\d{2})',
-                # DD/MM/YYYY
-                r'(\d{2}/\d{2}/\d{4})'
-            ]
-            
-            for pattern in date_patterns:
-                date_match = re.search(pattern, email_body)
-                if date_match:
-                    # Zakładamy, że to może być data nadania lub doręczenia
-                    if "doręczon" in email_body.lower() or "delivered" in email_body.lower():
-                        result["delivery_date"] = self._standardize_date(date_match.group(1))
-                    else:
-                        result["shipping_date"] = self._standardize_date(date_match.group(1))
-                    break
-                    
-            # Dodaj informację diagnostyczną
-            result["info"] = f"Dane wyodrębnione awaryjnie - niepełne informacje z {carrier_name}"
-            
-            return result
-            
-        except Exception as e:
-            logging.error(f"Błąd w awaryjnej ekstrakcji {carrier_name}: {e}")
-            return result
             
     def _standardize_date(self, date_string):
         """Konwertuje różne formaty dat na DD.MM.YYYY"""
@@ -1635,32 +1519,35 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
     
     def general_fallback_extraction(self, email_body, subject, carrier_name, recipient_email=None):
         """
-        Uniwersalna funkcja awaryjnej ekstrakcji danych gdy AI nie działa.
-        Używa wyrażeń regularnych do wyciągnięcia podstawowych informacji.
-        
-        Args:
-            email_body: Treść emaila
-            subject: Temat emaila
-            carrier_name: Nazwa przewoźnika
-            recipient_email: Email odbiorcy
-            
-        Returns:
-            dict: Słownik z podstawowymi danymi
+        SCALONA FUNKCJA AWARYJNA (FALLBACK).
+        Łączy logikę general_fallback_extraction i general_fallback_extraction.
+        Używa wyrażeń regularnych, gdy AI zawiedzie.
         """
+        import re
+        
+        # 1. Wstępne czyszczenie
         try:
-            # Usuń nagłówki Forward
             email_body = self._remove_forward_headers(email_body)
-            
-            result = {
-                "carrier": carrier_name,
-                "email": recipient_email,
-                "customer_name": recipient_email,
-                "user_key": recipient_email.split('@')[0] if recipient_email else None,
-                "status": "unknown"
-            }
-            
-            if carrier_name.lower() == "dhl":
-                # Numer przesyłki DHL
+        except: pass
+
+        # 2. Przygotuj podstawowy obiekt wyniku
+        result = {
+            "carrier": carrier_name,
+            "email": recipient_email,
+            "customer_name": recipient_email,
+            "user_key": recipient_email.split('@')[0] if recipient_email else None,
+            "status": "unknown",
+            "info": "Dane wyodrębnione awaryjnie (Regex)"
+        }
+        
+        carrier_lower = carrier_name.lower()
+        
+        try:
+            # =================================================================
+            # OBSŁUGA DHL
+            # =================================================================
+            if "dhl" in carrier_lower:
+                # Numer przesyłki (JJD / 3S / JVGL)
                 tracking_match = re.search(r'(JJD\d{18,25}|3S\d{10,15}|JVGL\d{10,15})', email_body)
                 if tracking_match:
                     result["package_number"] = tracking_match.group(1)
@@ -1670,67 +1557,151 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                 if pin_match:
                     result["pickup_code"] = pin_match.group(1)
                     result["status"] = "pickup"
-                
-                # Status na podstawie treści
-                if "już do ciebie jedzie" in email_body.lower():
+
+                # Termin odbioru
+                deadline_match = re.search(r'odbierz ją do (\d{2}-\d{2}-\d{4})', email_body)
+                if deadline_match:
+                    result["pickup_deadline"] = deadline_match.group(1)
+
+                # Wykrywanie statusu po słowach kluczowych
+                body_lower = email_body.lower()
+                if "już do ciebie jedzie" in body_lower or "przekazana kurierowi" in body_lower:
                     result["status"] = "transit"
-                elif "czeka na ciebie w automacie" in email_body.lower():
+                elif "czeka na ciebie" in body_lower or "gotowa do odbioru" in body_lower:
                     result["status"] = "pickup"
-                elif "dotarła" in email_body.lower() and "automat" in email_body.lower():
-                    result["status"] = "pickup"
-                    
-            elif carrier_name.lower() == "inpost":
-                # Numer przesyłki InPost
-                tracking_match = re.search(r'(\d{20})', email_body)
+                elif "doręczona" in body_lower or "dostarczona" in body_lower:
+                    result["status"] = "delivered"
+                elif "nadana" in body_lower:
+                    result["status"] = "shipment_sent"
+
+            # =================================================================
+            # OBSŁUGA INPOST
+            # =================================================================
+            elif "inpost" in carrier_lower:
+                # Numer przesyłki (24 cyfry)
+                tracking_match = re.search(r'(\d{24})', email_body)
                 if tracking_match:
                     result["package_number"] = tracking_match.group(1)
                 
-                # Kod paczkomatu
-                location_match = re.search(r'([A-Z]{3}\d{2}[A-Z]{2,4})', email_body)
-                if location_match:
-                    result["pickup_location"] = location_match.group(1)
+                # Kod paczkomatu (np. POZ01M)
+                locker_match = re.search(r'([A-Z]{3}\d{2}[A-Z]{2,4})', email_body)
+                if locker_match:
+                    result["pickup_location_code"] = locker_match.group(1)
                 
-                # Kod odbioru
-                code_match = re.search(r'kod odbioru.*?(\d{6})', email_body, re.IGNORECASE | re.DOTALL)
+                # Kod odbioru (6 cyfr)
+                code_match = re.search(r'(?:kod odbioru|kodem|kod)[:\s]*(\d{6})', email_body, re.IGNORECASE)
                 if code_match:
                     result["pickup_code"] = code_match.group(1)
                     result["status"] = "pickup"
-                
-                # Status
-                if "została nadana" in email_body.lower():
-                    result["status"] = "transit"
-                elif "czeka na ciebie" in email_body.lower():
+
+                # Wykrywanie statusu
+                body_lower = email_body.lower()
+                if "została nadana" in body_lower:
+                    result["status"] = "transit" # Lub shipment_sent, ale transit bezpieczniejszy dla InPost
+                elif "czeka na ciebie" in body_lower or "gotowa do odbioru" in body_lower:
                     result["status"] = "pickup"
-                elif "została dostarczona" in email_body.lower():
+                elif "została dostarczona" in body_lower or "odebrana" in body_lower:
                     result["status"] = "delivered"
-                    
-            elif carrier_name.lower() == "dpd":
-                # Numer przesyłki DPD
-                tracking_match = re.search(r'(\d{13}[A-Z])', email_body)
+
+            # =================================================================
+            # OBSŁUGA DPD
+            # =================================================================
+            elif "dpd" in carrier_lower:
+                # Numer przesyłki (13 cyfr + litera)
+                tracking_match = re.search(r'(\d{13}[A-Z]?)', email_body)
                 if tracking_match:
                     result["package_number"] = tracking_match.group(1)
                 
-                # Status
-                if "została nadana" in email_body.lower():
+                # Numer referencyjny
+                ref_match = re.search(r'Numer\s+referencyjny[^:]*:\s*([A-Z0-9]+)', email_body)
+                if ref_match:
+                    result["reference_number"] = ref_match.group(1)
+
+                # Wykrywanie statusu
+                body_lower = email_body.lower()
+                if "została nadana" in body_lower:
+                    result["status"] = "shipment_sent"
+                elif "doręczy" in body_lower or "w drodze" in body_lower:
                     result["status"] = "transit"
-                elif "doręczy" in email_body.lower():
-                    result["status"] = "transit"
-                elif "doręczone" in email_body.lower():
+                elif "doręczone" in body_lower or "dostarczona" in body_lower:
                     result["status"] = "delivered"
-                    
-            elif carrier_name.lower() == "aliexpress":
+                elif "gotowa" in body_lower and "punkt" in body_lower:
+                    result["status"] = "pickup"
+
+            # =================================================================
+            # OBSŁUGA ALIEXPRESS
+            # =================================================================
+            elif "aliexpress" in carrier_lower or "cainiao" in carrier_lower:
                 # Numer zamówienia
-                order_match = re.search(r'zamówienie\s+(\d{13,16})', email_body, re.IGNORECASE)
+                order_match = re.search(r'[Oo]rder(?:\s+|\s*[:#]\s*)(\d{10,})|[Zz]amów[^\d]+(\d{10,})', subject + " " + email_body[:1000])
                 if order_match:
-                    result["order_number"] = order_match.group(1)
+                    result["order_number"] = order_match.group(1) or order_match.group(2)
                 
-                # Status
-                if "potwierdzone" in email_body.lower():
+                # Link do zamówienia
+                link_match = re.search(r'(https://www\.aliexpress\.com/p/order/detail\.html\?orderId=\d+[^\s"<>]+)', email_body)
+                if link_match:
+                    result["item_link"] = link_match.group(1)
+
+                # Wykrywanie statusu (uwzględnij temat!)
+                body_lower = email_body.lower()
+                subj_lower = subject.lower() # To już masz
+                
+                # Łączymy body i temat dla pewności
+                combined_text = body_lower + " " + subj_lower 
+                
+                if "potwierdzone" in combined_text or "confirmed" in combined_text:
                     result["status"] = "confirmed"
+                elif "wysłane" in combined_text or "shipped" in combined_text or "transit" in combined_text:
+                    result["status"] = "transit"
+                elif "dostarczon" in combined_text or "delivered" in combined_text:
+                    result["status"] = "delivered"
+                elif "closed" in combined_text or "zamknięte" in combined_text:
+                    result["status"] = "closed"
+                    
+            # =================================================================
+            # OBSŁUGA POCZTY POLSKIEJ
+            # =================================================================
+            elif "poczta" in carrier_lower:
+                # Numer przesyłki (PX... lub (00)...)
+                tracking_match = re.search(r'(PX\d{10,})|(\(00\)\d{18})', email_body)
+                if tracking_match:
+                    result["package_number"] = tracking_match.group(1) or tracking_match.group(2)
+
+                # Status
+                body_lower = email_body.lower()
+                if "nadana" in body_lower: result["status"] = "shipment_sent"
+                elif "wydana do doręczenia" in body_lower: result["status"] = "transit"
+                elif "awizo" in body_lower or "placówce" in body_lower: result["status"] = "pickup"
+                elif "doręczona" in body_lower or "odebrana" in body_lower: result["status"] = "delivered"
+
+            # =================================================================
+            # EKSTRAKCJA DAT (Wspólna dla wszystkich)
+            # =================================================================
+            date_patterns = [
+                r'(\d{2}[.-]\d{2}[.-]\d{4})', # DD.MM.YYYY
+                r'(\d{4}-\d{2}-\d{2})',       # YYYY-MM-DD
+                r'(\d{2}/\d{2}/\d{4})'        # DD/MM/YYYY
+            ]
             
-            logging.info(f"Awaryjna ekstrakcja {carrier_name}: {result}")
+            for pattern in date_patterns:
+                date_match = re.search(pattern, email_body)
+                if date_match:
+                    found_date = self._standardize_date(date_match.group(1))
+                    
+                    # Logika przypisania daty
+                    if result.get("status") == "delivered":
+                        result["delivery_date"] = found_date
+                    elif result.get("status") == "shipment_sent":
+                        result["shipping_date"] = found_date
+                    elif result.get("status") == "pickup" and "pickup_deadline" not in result:
+                        # Czasami data w mailu o odbiorze to deadline
+                        pass 
+                    break
+
+            logging.info(f"⚡ Awaryjna ekstrakcja ({carrier_name}): Status={result.get('status')}, Nr={result.get('package_number') or result.get('order_number')}")
             return result
             
         except Exception as e:
-            logging.error(f"Błąd podczas awaryjnej ekstrakcji {carrier_name}: {e}")
-            return {"carrier": carrier_name, "status": "error", "email": recipient_email}
+            logging.error(f"Błąd w general_fallback_extraction dla {carrier_name}: {e}")
+            # Zwróć chociaż minimum danych, żeby nie wysypać programu
+            return result
