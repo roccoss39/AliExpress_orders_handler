@@ -2,7 +2,6 @@ import os
 from dotenv import load_dotenv
 
 # Załaduj zmienne środowiskowe z pliku .env
-
 load_dotenv(override=True)
 
 # Tryb śledzenia emaili:
@@ -18,7 +17,7 @@ CHECK_ONLY_UNSEEN = False
 # Czy przetwarzać również przeczytane maile? Tryb dla fun reprocess
 # True = Pobiera wszystko z ostatnich dni (UWAGA: zużywa więcej tokenów AI)
 # False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
-PROCESS_READ_EMAILS = False # Huge API calls
+PROCESS_READ_EMAILS = True # Huge API calls
 
 USE_OPENAI_API = False # Only regrex
 
@@ -27,6 +26,7 @@ GMAIL_EMAIL = os.getenv('GMAIL_EMAIL_1')
 GMAIL_PASSWORD = os.getenv('GMAIL_PASSWORD_1')
 INTERIA_EMAIL = os.getenv('INTERIA_EMAIL_1')
 INTERIA_PASSWORD = os.getenv('INTERIA_PASSWORD_1')
+DEFAULT_EMAIL_PASSWORD = INTERIA_PASSWORD 
 
 # Ustawienia arkusza Google
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
@@ -34,8 +34,6 @@ SHEET_NAME = "Ali_orders"
 
 # Adres do powiadomień
 NOTIFICATION_EMAIL = os.getenv('NOTIFICATION_EMAIL')
-
-DEFAULT_EMAIL_PASSWORD = INTERIA_PASSWORD 
 
 # Interwał sprawdzania (w minutach)
 CHECK_INTERVAL = 5
@@ -86,12 +84,7 @@ ALL_EMAIL_CONFIGS = [
         'email': os.getenv('O2_EMAIL_1'),
         'password': os.getenv('O2_PASSWORD_1'),
         'source': "o2"
-    },
-    {
-        'email': "deszcz.zczsed@interia.pl",
-        'password': INTERIA_PASSWORD,
-        'source': "interia"
-    },
+    }
     
 ]
 

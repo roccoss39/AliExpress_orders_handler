@@ -7,7 +7,7 @@ import ssl
 # ==========================================
 EMAIL = "jawna.kupa@interia.pl"
   # Wpisz dokładny adres
-PASSWORD = "Qweqweqweqwe1$"   # Wpisz hasło (pamiętaj, bez spacji na końcu!)
+PASSWORD = ""   # Wpisz hasło (pamiętaj, bez spacji na końcu!)
 # ==========================================
 
 IMAP_SERVER = "poczta.interia.pl"
