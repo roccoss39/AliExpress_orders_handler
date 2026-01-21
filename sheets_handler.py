@@ -804,3 +804,85 @@ class SheetsHandler:
 
         except Exception as e:
             logging.error(f"❌ Błąd podczas usuwania duplikatów: {e}")
+
+    # Dodaj to wewnątrz klasy SheetsHandler
+
+    def handle_order_update(self, order_data):
+        """
+        Główna metoda decyzyjna - kieruje dane do odpowiednich funkcji w zależności od statusu.
+        Zastępuje długi blok if/elif w main.py.
+        """
+        status = order_data.get("status")
+        carrier_name = order_data.get("carrier", "InPost")
+        
+        logging.info(f"🔄 Przetwarzanie statusu: {status} (Przewoźnik: {carrier_name})")
+
+        # 1. Obsługa przez dedykowany obiekt przewoźnika (np. InPost, DHL)
+        if carrier_name in self.carriers:
+            carrier = self.carriers[carrier_name]
+            
+            # Jeśli przewoźnik ma własną, zaawansowaną logikę (np. InPost update_pickup)
+            if hasattr(carrier, 'process_notification'):
+                carrier.process_notification(order_data)
+                return True
+
+        # 2. Standardowa obsługa statusów (dla reszty przypadków)
+        if status == "confirmed":
+            return self.update_confirmed_order(order_data)
+            
+        elif status == "delivered":
+            return self.update_delivered_order(order_data)
+            
+        elif status == "canceled" or status == "closed":
+            return self.update_canceled_order(order_data)
+            
+        elif status == "pickup":
+            return self.update_pickup_status(order_data)
+            
+        elif status == "transit":
+            # Logika dla transit (szukanie wiersza i aktualizacja)
+            row = None
+            if order_data.get("order_number"):
+                row = self.find_order_row(order_data["order_number"])
+            if not row and order_data.get("package_number"):
+                row = self.find_package_row(order_data["package_number"])
+            
+            if row:
+                # Kolumna O (15) to numer paczki
+                self.worksheet.update_cell(row, 15, f"'{order_data['package_number']}")
+                logging.info(f"✅ Zaktualizowano numer paczki w wierszu {row}")
+                return True
+            return False
+
+        elif status == "shipment_sent":
+            # Logika dla shipment_sent
+            if carrier_name in self.carriers:
+                carrier = self.carriers[carrier_name]
+                row = None
+                pkg = order_data.get("package_number")
+                
+                if pkg:
+                    # Szukamy w kolumnie O (15)
+                    try:
+                        cell = self.worksheet.find(pkg, in_column=15)
+                        if cell: row = cell.row
+                    except: pass
+                
+                if row:
+                    return carrier.update_shipment_sent(row, order_data)
+                else:
+                    # Próba znalezienia po użytkowniku
+                    user_key = order_data.get("user_key")
+                    if user_key:
+                        rows = self.find_user_rows(user_key)
+                        if rows:
+                            # Aktualizuj ostatnie zamówienie użytkownika
+                            return carrier.update_shipment_sent(rows[0], order_data)
+                        else:
+                            return carrier.create_shipment_row(order_data)
+                    else:
+                        # Fallback - utwórz nowy wiersz
+                        return carrier.create_shipment_row(order_data)
+            return False
+            
+        return False
