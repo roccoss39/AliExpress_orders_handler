@@ -34,8 +34,7 @@ class EmailHandler:
             }
         }
         
-        # ✅ POPRAWKA 1: Używamy metody _load_mappings zamiast surowego json.load
-        # Dzięki temu klucze są od razu znormalizowane (lowercase)
+        # Wczytujemy mapowania
         self.user_mappings = self._load_mappings()
 
         # Inicjalizacja handlerów danych
@@ -422,7 +421,7 @@ class EmailHandler:
                 logging.info("Brak daty w arkuszu - aktualizuję")
                 return True
             
-            # ✅ POPRAWKA 3: Zabezpieczenie przed błędem formatu daty
+            # Zabezpieczenie przed błędem formatu daty
             try:
                 new_dt = datetime.strptime(new_email_date, '%Y-%m-%d %H:%M:%S')
                 existing_dt = datetime.strptime(existing_email_date, '%Y-%m-%d %H:%M:%S')
@@ -495,7 +494,8 @@ class EmailHandler:
                 
                 to_header = email_msg.get("To", "")
                 email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', to_header)
-                recipient = email_match.group(0) if email_match else None
+                # ✅ POPRAWKA: Normalizacja adresu email do małych liter!
+                recipient = email_match.group(0).lower() if email_match else None
                 recipient_name = self.extract_recipient_name(to_header)
 
                 if not recipient:
@@ -505,10 +505,11 @@ class EmailHandler:
                         logging.info(f"Znaleziono nazwę użytkownika w treści: {user_name}")
                         recipient = f"{user_name}@gmail.com"
                     else:
+                        # ✅ POPRAWKA: Fallback też wymusza małe litery
                         if email_source == "gmail":
-                            recipient = config.GMAIL_EMAIL
+                            recipient = config.GMAIL_EMAIL.lower()
                         else:
-                            recipient = config.INTERIA_EMAIL
+                            recipient = config.INTERIA_EMAIL.lower()
                         logging.info(f"Użyto domyślnego adresu: {recipient}")
 
                 user_key = None
@@ -591,20 +592,33 @@ class EmailHandler:
             if handler.can_handle(subject, body):
                 logging.info(f"Wykryto email obsługiwany przez {handler.name}")
                 
+                # --- ZMODYFIKOWANA LOGIKA: Sprawdzenie daty z obsługą IGNORE_LAST_EMAIL_DATE_CHECK ---
                 if email_date and not force_process:
                     user_key = recipient.split('@')[0].lower() if recipient and '@' in recipient else None
                     if user_key:
                         existing_email_date = self._get_user_last_email_date(user_key)
-                        if not existing_email_date or self.should_update_based_on_date(email_date, existing_email_date):
+                        
+                        # Pobierz flagę z konfiguracji
+                        ignore_date_check = getattr(config, 'IGNORE_LAST_EMAIL_DATE_CHECK', False)
+                        
+                        # Sprawdzamy, czy mail jest nowszy
+                        is_newer = not existing_email_date or self.should_update_based_on_date(email_date, existing_email_date)
+                        
+                        if is_newer:
                             logging.info(f"✅ Przetwarzam najnowszy email dla {user_key}")
                             self._update_user_last_email_date(user_key, email_date)
+                        elif ignore_date_check:
+                            # Tryb FORCE: Przetwarzamy maila, ale logujemy ostrzeżenie
+                            logging.warning(f"⚠️ TRYB FORCE: Przetwarzam maila z {email_date} dla {user_key}, mimo że ostatni był {existing_email_date}")
                         else:
+                            # Standardowy tryb: Pomijamy stary email
                             logging.info(f"⏭️ Pomijam starszy email dla {user_key}")
                             return None
                 elif force_process:
                      user_key = recipient.split('@')[0].lower() if recipient else None
                      if user_key:
                          self._update_user_last_email_date(user_key, email_date)
+                # -----------------------------------------------------------------------------------
 
                 # 1. PRIORYTET: AI
                 if use_ai:
