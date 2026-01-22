@@ -111,9 +111,6 @@ def main_loop():
             for order_data in processed_emails:
                 if is_shutdown_requested(): break
                 
-                # Powiadomienie na Telegram
-                telegram.send_new_package_alert(order_data)
-                
                 # Dodatkowe powiadomienie mailowe dla odbioru
                 if order_data.get("status") == "pickup":
                     send_pickup_notification(order_data)
@@ -121,7 +118,7 @@ def main_loop():
                 # ✅ GŁÓWNA AKTUALIZACJA ARKUSZA
                 # Teraz sheets_handler robi wszystko: tworzy, aktualizuje, archiwizuje, czyści konta.
                 limiters.wait_for("sheets_write")
-                sheets_handler.handle_order_update(order_data)
+                sheets_handler.handle_order_update(order_data, telegram_notifier=telegram)
 
                 # ✅ CZYSZCZENIE LOKALNEGO PLIKU JSON
                 # SheetsHandler czyści arkusz, a my tutaj doczyszczamy pamięć bota

@@ -100,24 +100,24 @@ class SheetsHandler:
 
     # --- GLÓWNA LOGIKA ---
 
-    def handle_order_update(self, order_data):
+    def handle_order_update(self, order_data, telegram_notifier=None):
         """
-        Aktualizuje zamówienie, archiwizuje po dostarczeniu i zapobiega 'powrotom' usuniętych userów.
+        Aktualizuje zamówienie, archiwizuje po dostarczeniu, usuwa konto z Accounts 
+        i ignoruje 'osierocone' dostarczenia (Ghost Orders).
+        Wysyła powiadomienie Telegram tylko po udanej operacji.
         """
-        # Upewnij się, że time jest zaimportowane na górze pliku, lub tu:
-        import time
 
         order_number = order_data.get('order_number')
         new_status = order_data.get('status', 'Unknown')
         
-        # Pobieramy email/user_key (kluczowe dla blokowania)
+        # Pobieramy email/user_key (kluczowe dla blokowania i czyszczenia)
         email_val = order_data.get('email') or order_data.get('user_key')
 
-        # 1. Znajdź wiersz
+        # 1. Znajdź wiersz w arkuszu
         row_index = self.find_order_row(order_data)
         
         if row_index:
-            # --- A. LOGIKA PRIORYTETÓW ---
+            # --- A. LOGIKA PRIORYTETÓW (Dla istniejących wierszy) ---
             try:
                 status_col_idx = Col.STATUS 
                 current_status = self.worksheet.cell(row_index, status_col_idx).value
@@ -126,6 +126,7 @@ class SheetsHandler:
                 
                 logging.info(f"⚖️ Porównanie statusów: '{current_status}' ({current_prio}) vs '{new_status}' ({new_prio})")
 
+                # Jeśli nowy status jest "gorszy" niż obecny -> BLOKUJEMY WSZYSTKO
                 if new_prio < current_prio:
                     logging.warning(f"⛔ Blokada aktualizacji! '{new_status}' < '{current_status}'.")
                     return 
@@ -134,7 +135,11 @@ class SheetsHandler:
             
             # --- B. AKTUALIZACJA ---
             logging.info(f"📝 Znaleziono wiersz {row_index}. Aktualizuję.")
-            self.update_row_cells(row_index, order_data) 
+            self.update_row_cells(row_index, order_data)
+            
+            # ✅ WYSŁANIE TELEGRAMA (Bo aktualizacja doszła do skutku)
+            if telegram_notifier:
+                telegram_notifier.send_new_package_alert(order_data)
 
             # --- C. AUTOMATYCZNA ARCHIWIZACJA ---
             final_keywords = ['delivered', 'dostarczona', 'odebrana', 'zwrócona', 'picked up', 'zamknięte']
@@ -142,40 +147,41 @@ class SheetsHandler:
 
             if is_final:
                 logging.info(f"📦 Wykryto status końcowy: '{new_status}'. Rozpoczynam archiwizację...")
-                time.sleep(2)
+                time.sleep(2) # Krótka pauza dla pewności zapisu
                 
                 try:
+                    # 1. Przenieś do zakładki Delivered
                     moved = self.move_row_to_delivered(row_index)
                     
                     if moved:
-                        # Uzupełnienie maila z arkusza, jeśli brak w danych
+                        # Uzupełnienie maila z arkusza, jeśli brak w danych (potrzebne do czyszczenia)
                         if not email_val:
                             email_val = self.worksheet.cell(row_index, Col.EMAIL).value
 
                         pkg_val = order_data.get('package_number')
                         ord_val = order_data.get('order_number')
 
-                        # 2. CZYSZCZENIE MAPOWANIA (Bezpośrednio w EmailHandler)
+                        # 2. CZYSZCZENIE MAPOWANIA (JSON + Cache)
                         if email_val and hasattr(self, 'email_handler') and self.email_handler:
-                            logging.info(f"🧹 Zlecam usunięcie: {email_val} (Pkg: {pkg_val}, Zam: {ord_val})")
+                            logging.info(f"🧹 Zlecam usunięcie mapowania: {email_val}")
                             self.email_handler.remove_user_mapping(email_val, pkg_val, ord_val)
                             
-                            # ✅ ZAPIS DO CACHE: "Ten user został usunięty, nie tykaj go przez chwilę"
+                            # Cache (Cool-down) - zapobiega natychmiastowemu powrotowi usuniętego usera
                             if email_val:
                                 self.deleted_users_cache[str(email_val).lower().strip()] = time.time()
                                 logging.info(f"❄️ Dodano {email_val} do cache usuniętych (Cool-down 60s)")
-                            # 3. 🔥 USUWANIE Z ARKUSZA ACCOUNTS (To przywraca funkcjonalność!)
+                            
+                            # 3. 🔥 USUWANIE Z ARKUSZA ACCOUNTS
                             if email_val:
                                 try:
-                                    # Tworzymy instancję managera, przekazując 'self' (czyli SheetsHandler)
-                                    # UWAGA: Jeśli EmailAvailabilityManager jest w innym pliku, musisz go zaimportować na górze!
+                                    # Tworzymy instancję managera, przekazując 'self'
                                     acct_manager = EmailAvailabilityManager(self)
                                     acct_manager.free_up_account(email_val)
                                     logging.info(f"🧨 Usunięto wiersz dla {email_val} z zakładki Accounts.")
                                 except Exception as e:
                                     logging.error(f"❌ Błąd podczas usuwania z Accounts: {e}")
 
-                        # 3. Usuń wiersz z głównego arkusza
+                        # 4. Usuń wiersz z głównego arkusza
                         self.worksheet.delete_rows(row_index)
                         logging.info(f"🗑️ Usunięto wiersz {row_index} z głównej listy.")
                     else:
@@ -185,7 +191,21 @@ class SheetsHandler:
                     logging.error(f"❌ Błąd podczas auto-archiwizacji: {e}")
 
         else:
-            # --- D. TWORZENIE NOWEGO (TUTAJ JEST FIX!) ---
+            # ====================================================
+            # 👻 OCHRONA PRZED DUCHAMI (GHOST ORDERS)
+            # ====================================================
+            # Jeśli nie mamy zamówienia w bazie, a przychodzi status końcowy -> IGNORUJEMY.
+            ignore_statuses = [
+                'delivered', 'dostarczona', 'odebrana', 'doręczona'
+            ]
+            
+            is_ghost_final = any(k in str(new_status).lower() for k in ignore_statuses)
+            
+            if is_ghost_final:
+                logging.warning(f"👻 IGNORUJĘ DUCHA: Status '{new_status}' dla {email_val}, ale nie ma takiego zamówienia w arkuszu.")
+                return  # <--- WYCHODZIMY Z FUNKCJI (Bez tworzenia wiersza, bez Telegrama)
+
+            # --- D. TWORZENIE NOWEGO (Z BLOKADĄ CACHE) ---
             
             # Sprawdzamy, czy ten user nie został usunięty w ciągu ostatnich 60 sekund
             if email_val:
@@ -195,10 +215,14 @@ class SheetsHandler:
                 # Jeśli usunięto mniej niż 60 sekund temu -> BLOKUJEMY
                 if time.time() - last_deleted < 60:
                     logging.warning(f"🛑 ZABLOKOWANO utworzenie wiersza dla {email_val} - użytkownik został usunięty chwilę temu!")
-                    return # <--- WYCHODZIMY, NIE TWORZYMY WIERSZA
+                    return # <--- WYCHODZIMY
 
             logging.info("🆕 Nie znaleziono wiersza. Tworzę nowy.")
             self.append_order(order_data)
+            
+            # ✅ WYSŁANIE TELEGRAMA (Bo utworzono nowe zamówienie)
+            if telegram_notifier:
+                telegram_notifier.send_new_package_alert(order_data)
 
     def find_order_row(self, order_data):
         """Znajduje numer wiersza na podstawie adresu email."""
