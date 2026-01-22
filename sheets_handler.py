@@ -5,8 +5,8 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta
-from carriers_sheet_handlers import Col, InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier
- 
+from carriers_sheet_handlers import Col, EmailAvailabilityManager, InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier
+
 class SheetsHandler:
     _instance = None
     _spreadsheet = None
@@ -164,6 +164,16 @@ class SheetsHandler:
                             if email_val:
                                 self.deleted_users_cache[str(email_val).lower().strip()] = time.time()
                                 logging.info(f"❄️ Dodano {email_val} do cache usuniętych (Cool-down 60s)")
+                            # 3. 🔥 USUWANIE Z ARKUSZA ACCOUNTS (To przywraca funkcjonalność!)
+                            if email_val:
+                                try:
+                                    # Tworzymy instancję managera, przekazując 'self' (czyli SheetsHandler)
+                                    # UWAGA: Jeśli EmailAvailabilityManager jest w innym pliku, musisz go zaimportować na górze!
+                                    acct_manager = EmailAvailabilityManager(self)
+                                    acct_manager.free_up_account(email_val)
+                                    logging.info(f"🧨 Usunięto wiersz dla {email_val} z zakładki Accounts.")
+                                except Exception as e:
+                                    logging.error(f"❌ Błąd podczas usuwania z Accounts: {e}")
 
                         # 3. Usuń wiersz z głównego arkusza
                         self.worksheet.delete_rows(row_index)

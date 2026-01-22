@@ -9,8 +9,7 @@ load_dotenv(override=True)
 # 'ACCOUNTS' - sprawdza tylko maile wpisane w zakładce "Accounts" w Google Sheets
 EMAIL_TRACKING_MODE = 'ACCOUNTS'
 
-# Czy wysyłać powiadomienia mailowe o odbiorze? (True = Tak, False = Nie)
-SEND_EMAIL_NOTIFICATIONS = False
+
 
 # Kierunek przetwarzania maili
 # True  = (Domyślnie) Od NAJNOWSZYCH do najstarszych. 
@@ -108,7 +107,7 @@ ALL_EMAIL_CONFIGS = [
 
 # ✅ KONFIGURACJA OKRESÓW SPRAWDZANIA
 EMAIL_CHECK_SETTINGS = {
-    'days_back': 30,                    # 30 dni wstecz
+    'days_back': 60,                    # 30 dni wstecz
     'fallback_limit': 50,               # Limit emaili w trybie fallback
     'max_emails_per_account': 100,      # Maksymalna liczba emaili na konto
     'o2_email_limit': 50,               # Specjalny limit dla O2
@@ -116,6 +115,9 @@ EMAIL_CHECK_SETTINGS = {
     'mark_as_read': True,               # Oznaczaj emaile jako przeczytane
     'auto_expunge': True                # Automatycznie zapisuj zmiany
 }
+
+# Czy wysyłać powiadomienia mailowe o odbiorze? (True = Tak, False = Nie)
+SEND_EMAIL_NOTIFICATIONS = False
 
 # --- TELEGRAM CONFIG ---
 ENABLE_TELEGRAM = True
