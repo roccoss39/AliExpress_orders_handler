@@ -15,6 +15,8 @@ def run_reprocess(target_email, limit=None):
     email_handler = EmailHandler()
     sheets_handler = SheetsHandler()
     
+    sheets_handler.email_handler = email_handler
+    
     if not sheets_handler.connect():
         logging.error("❌ Błąd połączenia z arkuszem.")
         return

@@ -127,59 +127,73 @@ class EmailHandler:
     
     def remove_user_mapping(self, user_key, package_number=None, order_number=None):
         """
-        Usuwa zamówienie. 
-        JEŚLI brak numerów paczki/zamówienia -> USUWA CAŁEGO UŻYTKOWNIKA (Nuclear Option).
+        Wersja z AGRESYWNYM DEBUGOWANIEM.
         """
-        if not user_key:
-            return False
-
-        user_key = user_key.lower().strip()
+        # 1. Normalizacja klucza
+        raw_key = str(user_key)
+        clean_key = raw_key.lower().strip()
         
-        if user_key not in self.user_mappings:
+        logging.info(f"🕵️‍♂️ DEBUG: remove_user_mapping wywołane dla: '{raw_key}' (Clean: '{clean_key}')")
+        logging.info(f"🕵️‍♂️ DEBUG: Dostępne klucze w pamięci: {list(self.user_mappings.keys())}")
+
+        if clean_key not in self.user_mappings:
+            logging.warning(f"⚠️ DEBUG: Klucza '{clean_key}' BRAK w user_mappings! Nie mam co usuwać.")
             return False
 
-        user_data = self.user_mappings[user_key]
+        user_data = self.user_mappings[clean_key]
         changed = False
         
-        # --- 1. CZY MAMY KONKRETNE DANE DO USUNIĘCIA? ---
+        # --- OPCJA NUKLEARNA (Brak numerów = usuń wszystko) ---
         has_specific_data = (package_number and str(package_number).strip()) or \
                             (order_number and str(order_number).strip())
 
-        # Jeśli NIE mamy konkretnych numerów, zakładamy, że trzeba usunąć całe konto
         if not has_specific_data:
-            logging.warning(f"⚠️ Brak nr paczki/zamówienia dla {user_key}. Usuwam CAŁEGO użytkownika z monitoringu.")
-            del self.user_mappings[user_key]
-            self._save_mappings()
-            return True
+            logging.info(f"☢️ DEBUG: Opcja Nuklearna dla '{clean_key}'. Usuwam wpis z pamięci.")
+            del self.user_mappings[clean_key]
+            
+            # NATYCHMIASTOWY ZAPIS
+            try:
+                self._save_mappings()
+                logging.info(f"✅ DEBUG: Plik JSON nadpisany po usunięciu '{clean_key}'.")
+                
+                # Weryfikacja
+                if clean_key not in self.user_mappings:
+                    logging.info(f"✅ DEBUG: Weryfikacja OK - klucza już nie ma w pamięci.")
+                else:
+                    logging.error(f"❌ DEBUG: CRITICAL - Klucz nadal istnieje mimo delete?!")
+                    
+                return True
+            except Exception as e:
+                logging.error(f"❌ DEBUG: Błąd zapisu JSON: {e}")
+                return False
 
-        # --- 2. USUWANIE KONKRETNYCH NUMERÓW (Jeśli są podane) ---
+        # --- OPCJA CHIRURGICZNA ---
+        logging.info(f"🔪 DEBUG: Tryb chirurgiczny (Paczka: {package_number}, Zam: {order_number})")
+        
         if package_number:
             if "package_numbers" in user_data and package_number in user_data["package_numbers"]:
                 user_data["package_numbers"].remove(package_number)
-                logging.info(f"🗑️ Usunięto paczkę {package_number} z mapowania {user_key}")
                 changed = True
 
         if order_number:
             order_str = str(order_number)
             if "order_numbers" in user_data and order_str in user_data["order_numbers"]:
                 user_data["order_numbers"].remove(order_str)
-                logging.info(f"🗑️ Usunięto zamówienie {order_number} z mapowania {user_key}")
                 changed = True
 
-        # --- 3. CZY USER JEST JUŻ PUSTY? ---
-        # Sprawdzamy, czy po usunięciu konkretów zostało coś jeszcze
+        # Czy puste?
         pkgs = user_data.get("package_numbers", [])
         ords = user_data.get("order_numbers", [])
         
         if not pkgs and not ords:
-            if user_key in self.user_mappings:
-                del self.user_mappings[user_key]
-                logging.info(f"❌ Konto {user_key} puste - usuwam całkowicie.")
-                self._save_mappings()
-                return True 
+            logging.info(f"🗑️ DEBUG: User '{clean_key}' jest pusty po czyszczeniu. Usuwam całkowicie.")
+            del self.user_mappings[clean_key]
+            self._save_mappings()
+            return True 
 
         if changed:
             self._save_mappings()
+            logging.info(f"💾 DEBUG: Zapisano zmiany częściowe dla '{clean_key}'.")
             
         return False
 
