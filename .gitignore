@@ -53,3 +53,6 @@ test_emails/*.eml
 # Backup files
 *.bak
 *.backup
+
+.venv/
+venv/
