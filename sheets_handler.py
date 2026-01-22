@@ -102,14 +102,15 @@ class SheetsHandler:
 
     def handle_order_update(self, order_data):
         """
-        Aktualizuje zamówienie, archiwizuje i zapobiega 'powrotom' usuniętych userów.
+        Aktualizuje zamówienie, archiwizuje po dostarczeniu i zapobiega 'powrotom' usuniętych userów.
         """
-        import time # Upewnij się, że time jest zaimportowane
-        
+        # Upewnij się, że time jest zaimportowane na górze pliku, lub tu:
+        import time
+
         order_number = order_data.get('order_number')
         new_status = order_data.get('status', 'Unknown')
         
-        # Pobieramy email/user_key wcześniej, bo będzie potrzebny w obu miejscach
+        # Pobieramy email/user_key (kluczowe dla blokowania)
         email_val = order_data.get('email') or order_data.get('user_key')
 
         # 1. Znajdź wiersz
@@ -154,16 +155,17 @@ class SheetsHandler:
                         pkg_val = order_data.get('package_number')
                         ord_val = order_data.get('order_number')
 
-                        # 3. CZYSZCZENIE MAPOWANIA
+                        # 2. CZYSZCZENIE MAPOWANIA (Bezpośrednio w EmailHandler)
                         if email_val and hasattr(self, 'email_handler') and self.email_handler:
                             logging.info(f"🧹 Zlecam usunięcie: {email_val} (Pkg: {pkg_val}, Zam: {ord_val})")
                             self.email_handler.remove_user_mapping(email_val, pkg_val, ord_val)
                             
-                            # ✅ DODAJEMY DO CACHE: Zapamiętaj, że ten user został właśnie wyczyszczony
-                            # Zapisujemy czas, żeby blokada trwała np. 60 sekund
-                            self.deleted_users_cache[str(email_val).lower()] = time.time()
+                            # ✅ ZAPIS DO CACHE: "Ten user został usunięty, nie tykaj go przez chwilę"
+                            if email_val:
+                                self.deleted_users_cache[str(email_val).lower().strip()] = time.time()
+                                logging.info(f"❄️ Dodano {email_val} do cache usuniętych (Cool-down 60s)")
 
-                        # 4. Usuń wiersz
+                        # 3. Usuń wiersz z głównego arkusza
                         self.worksheet.delete_rows(row_index)
                         logging.info(f"🗑️ Usunięto wiersz {row_index} z głównej listy.")
                     else:
@@ -171,21 +173,19 @@ class SheetsHandler:
 
                 except Exception as e:
                     logging.error(f"❌ Błąd podczas auto-archiwizacji: {e}")
-                    import traceback
-                    traceback.print_exc()
 
         else:
-            # --- D. TWORZENIE NOWEGO (Z BLOKADĄ) ---
+            # --- D. TWORZENIE NOWEGO (TUTAJ JEST FIX!) ---
             
             # Sprawdzamy, czy ten user nie został usunięty w ciągu ostatnich 60 sekund
             if email_val:
-                user_key_str = str(email_val).lower()
+                user_key_str = str(email_val).lower().strip()
                 last_deleted = self.deleted_users_cache.get(user_key_str, 0)
                 
                 # Jeśli usunięto mniej niż 60 sekund temu -> BLOKUJEMY
                 if time.time() - last_deleted < 60:
                     logging.warning(f"🛑 ZABLOKOWANO utworzenie wiersza dla {email_val} - użytkownik został usunięty chwilę temu!")
-                    return
+                    return # <--- WYCHODZIMY, NIE TWORZYMY WIERSZA
 
             logging.info("🆕 Nie znaleziono wiersza. Tworzę nowy.")
             self.append_order(order_data)
@@ -539,54 +539,124 @@ class SheetsHandler:
             traceback.print_exc()
 
     def update_row_cells(self, row_index, order_data):
-        """
-        Aktualizuje wybrane komórki w istniejącym wierszu.
-        Używa update_cells dla oszczędności API.
-        """
+        """Aktualizuje wybrane komórki w istniejącym wierszu i nadaje KOLOR."""
         try:
             cells_to_update = []
             
-            # Funkcja pomocnicza: dodaje komórkę do listy aktualizacji tylko gdy mamy dane
             def add_cell(col_idx, key):
                 val = order_data.get(key)
-                # Aktualizujemy tylko, jeśli wartość nie jest None
                 if val is not None: 
-                    # Tworzymy obiekt gspread.Cell(wiersz, kolumna, wartość)
                     cells_to_update.append(
                         gspread.Cell(row_index, col_idx, str(val))
                     )
 
-            # --- MAPOWANIE DANYCH DO KOLUMN ---
-            
-            # 1. STATUS (Kluczowe)
+            # Mapowanie kolumn
             add_cell(Col.STATUS, 'status')
-            
-            # 2. Data Wiadomości (Aktualizujemy zawsze przy nowym mailu)
             add_cell(Col.MSG_DATE, 'email_date')
-            
-            # 3. Kod Odbioru (Często dochodzi później)
             add_cell(Col.PICKUP_CODE, 'pickup_code')
-            
-            # 4. Numer Paczki (Może się zmienić lub pojawić później)
             add_cell(Col.PKG_NUM, 'package_number')
-            
-            # 5. Link do śledzenia
             add_cell(Col.LINK, 'tracking_link')
-            
-            # 6. Kod QR (Link)
             add_cell(Col.QR, 'qr_link')
-            
-            # 7. Przewoźnik (Info) - jeśli się zmienił
             add_cell(Col.INFO, 'carrier')
 
-            # --- WYSŁANIE ZMIAN DO GOOGLE ---
+            # 1. Aktualizacja danych
             if cells_to_update:
                 self.worksheet.update_cells(cells_to_update)
                 logging.info(f"✅ Zaktualizowano {len(cells_to_update)} pól w wierszu {row_index}")
-            else:
-                logging.info(f"ℹ️ Brak nowych danych do aktualizacji w wierszu {row_index}")
+
+            # 2. 🎨 AKTUALIZACJA KOLORU (Zależna od kuriera!)
+            new_status = order_data.get('status', '')
+            carrier_name = order_data.get('carrier', 'Unknown') # Pobieramy nazwę kuriera
+            
+            if new_status:
+                # ✅ TU JEST ZMIANA: Przekazujemy carrier_name
+                color = self._get_status_color(new_status, carrier_name)
+                
+                range_name = f"A{row_index}:P{row_index}"
+                
+                self.worksheet.format(range_name, {
+                    "backgroundColor": color,
+                    "textFormat": {"foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0}}
+                })
+                logging.info(f"🎨 Zmieniono kolor wiersza {row_index} (Status: {new_status}, Carrier: {carrier_name})")
 
         except Exception as e:
             logging.error(f"❌ Błąd w update_row_cells: {e}")
-            import traceback
-            traceback.print_exc()
+
+    def _get_status_color(self, status_text, carrier_name="Unknown"):
+        """
+        Zwraca kolor RGB zależnie od STATUSU i PRZEWOŹNIKA.
+        """
+        status = str(status_text).lower()
+        carrier = str(carrier_name).lower()
+        
+        # Domyślny kolor (biały)
+        default_color = {"red": 1.0, "green": 1.0, "blue": 1.0}
+
+        # ==========================================
+        # 🎨 PALETY KOLORÓW WG PRZEWOŹNIKÓW
+        # ==========================================
+        palettes = {
+            # --- ALIEXPRESS (Odcienie pomarańczu/żółci/zieleni) ---
+            "aliexpress": {
+                "confirmed": {"red": 1.0, "green": 0.9, "blue": 0.8},
+                "zatwierdzon": {"red": 1.0, "green": 0.9, "blue": 0.8},
+                "transit": {"red": 1.0, "green": 0.7, "blue": 0.4},     # Pomarańczowy
+                "shipment_sent": {"red": 1.0, "green": 0.9, "blue": 0.8},
+                "pickup": {"red": 1.0, "green": 0.7, "blue": 0.4},
+                "delivered": {"red": 0.5, "green": 0.9, "blue": 0.8},   # Zielony
+                "closed": {"red": 1.0, "green": 0.2, "blue": 0.2}       # Czerwony
+            },
+            # --- INPOST (Odcienie niebieskiego) ---
+            "inpost": {
+                "shipment_sent": {"red": 0.8, "green": 0.9, "blue": 1.0},
+                "pickup": {"red": 0.5, "green": 0.5, "blue": 1.0},      # Mocny niebieski
+                "odbioru": {"red": 0.5, "green": 0.5, "blue": 1.0},
+                "delivered": {"red": 0.5, "green": 0.9, "blue": 0.8}    # Zielony/Morski
+            },
+            # --- DPD (Niebieski/Fioletowy) ---
+            "dpd": {
+                "shipment_sent": {"red": 0.9, "green": 0.8, "blue": 1.0},
+                "transit": {"red": 0.9, "green": 0.8, "blue": 1.0},
+                "pickup": {"red": 0.5, "green": 0.3, "blue": 0.8},
+                "delivered": {"red": 0.5, "green": 0.9, "blue": 0.8}
+            },
+            # --- DHL (Żółty) ---
+            "dhl": {
+                "shipment_sent": {"red": 1.0, "green": 1.0, "blue": 0.8},
+                "pickup": {"red": 1.0, "green": 0.9, "blue": 0.0},      # Żółty DHL
+                "delivered": {"red": 0.5, "green": 0.9, "blue": 0.8}
+            },
+            # --- POCZTA POLSKA (Czerwony/Różowy) ---
+            "pocztapolska": {
+                "shipment_sent": {"red": 1.0, "green": 0.9, "blue": 0.9},
+                "transit": {"red": 0.95, "green": 0.9, "blue": 0.9},
+                "pickup": {"red": 1.0, "green": 0.6, "blue": 0.6},
+                "delivered": {"red": 0.8, "green": 0.95, "blue": 0.8}
+            }
+        }
+
+        # 1. Wybierz paletę dla danego kuriera (lub domyślną 'universal')
+        selected_palette = None
+        for key in palettes:
+            if key in carrier: # np. jeśli "inpost" jest w "InPost Sp. z o.o."
+                selected_palette = palettes[key]
+                break
+        
+        # Jeśli nie znaleziono kuriera, użyj uniwersalnej palety (z poprzedniego kroku)
+        if not selected_palette:
+            selected_palette = {
+                "delivered": {"red": 0.5, "green": 0.9, "blue": 0.8},
+                "pickup": {"red": 1.0, "green": 1.0, "blue": 0.8},
+                "transit": {"red": 0.9, "green": 0.9, "blue": 1.0},
+                "shipment_sent": {"red": 0.9, "green": 0.9, "blue": 0.9},
+                "closed": {"red": 1.0, "green": 0.8, "blue": 0.8}
+            }
+
+        # 2. Znajdź kolor dla statusu w wybranej palecie
+        # Sprawdzamy czy klucz statusu (np. "pickup") znajduje się w tekście statusu (np. "ready for pickup")
+        for key, color in selected_palette.items():
+            if key in status:
+                return color
+                
+        return default_color
