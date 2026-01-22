@@ -9,6 +9,9 @@ load_dotenv(override=True)
 # 'ACCOUNTS' - sprawdza tylko maile wpisane w zakładce "Accounts" w Google Sheets
 EMAIL_TRACKING_MODE = 'ACCOUNTS'
 
+# Czy wysyłać powiadomienia mailowe o odbiorze? (True = Tak, False = Nie)
+SEND_EMAIL_NOTIFICATIONS = False
+
 # Kierunek przetwarzania maili
 # True  = (Domyślnie) Od NAJNOWSZYCH do najstarszych. 
 #         Szybkie. Bierze tylko ostatni status paczki i ignoruje starsze maile w tym samym cyklu.

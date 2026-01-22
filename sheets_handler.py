@@ -561,6 +561,8 @@ class SheetsHandler:
 
             # 1. Aktualizacja danych
             if cells_to_update:
+                logging.info(f"🐞 [DEBUG] Czekam 1s przed zapisem wiersza {row_index}...") ###TO DETLEte!!!!!
+                time.sleep(1) ###TO DETLEte!!!!!
                 self.worksheet.update_cells(cells_to_update)
                 logging.info(f"✅ Zaktualizowano {len(cells_to_update)} pól w wierszu {row_index}")
 
