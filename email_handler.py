@@ -127,7 +127,8 @@ class EmailHandler:
     
     def remove_user_mapping(self, user_key, package_number=None, order_number=None):
         """
-        Usuwa zakończone zamówienie. Jeśli brak aktywnych zamówień -> usuwa całego usera.
+        Usuwa zamówienie. 
+        JEŚLI brak numerów paczki/zamówienia -> USUWA CAŁEGO UŻYTKOWNIKA (Nuclear Option).
         """
         if not user_key:
             return False
@@ -140,14 +141,24 @@ class EmailHandler:
         user_data = self.user_mappings[user_key]
         changed = False
         
-        # 1. Usuwanie numeru paczki
+        # --- 1. CZY MAMY KONKRETNE DANE DO USUNIĘCIA? ---
+        has_specific_data = (package_number and str(package_number).strip()) or \
+                            (order_number and str(order_number).strip())
+
+        # Jeśli NIE mamy konkretnych numerów, zakładamy, że trzeba usunąć całe konto
+        if not has_specific_data:
+            logging.warning(f"⚠️ Brak nr paczki/zamówienia dla {user_key}. Usuwam CAŁEGO użytkownika z monitoringu.")
+            del self.user_mappings[user_key]
+            self._save_mappings()
+            return True
+
+        # --- 2. USUWANIE KONKRETNYCH NUMERÓW (Jeśli są podane) ---
         if package_number:
             if "package_numbers" in user_data and package_number in user_data["package_numbers"]:
                 user_data["package_numbers"].remove(package_number)
                 logging.info(f"🗑️ Usunięto paczkę {package_number} z mapowania {user_key}")
                 changed = True
 
-        # 2. Usuwanie numeru zamówienia
         if order_number:
             order_str = str(order_number)
             if "order_numbers" in user_data and order_str in user_data["order_numbers"]:
@@ -155,18 +166,15 @@ class EmailHandler:
                 logging.info(f"🗑️ Usunięto zamówienie {order_number} z mapowania {user_key}")
                 changed = True
 
-        # 3. SPRAWDZANIE PUSTOŚCI
-        user_data = self.user_mappings.get(user_key, {})
+        # --- 3. CZY USER JEST JUŻ PUSTY? ---
+        # Sprawdzamy, czy po usunięciu konkretów zostało coś jeszcze
         pkgs = user_data.get("package_numbers", [])
         ords = user_data.get("order_numbers", [])
         
-        has_no_packages = len(pkgs) == 0
-        has_no_orders = len(ords) == 0
-        
-        if has_no_packages and has_no_orders:
+        if not pkgs and not ords:
             if user_key in self.user_mappings:
                 del self.user_mappings[user_key]
-                logging.info(f"❌ Usunięto całkowicie wpis użytkownika {user_key} (brak aktywnych zamówień).")
+                logging.info(f"❌ Konto {user_key} puste - usuwam całkowicie.")
                 self._save_mappings()
                 return True 
 
@@ -447,7 +455,11 @@ class EmailHandler:
         configs_to_check = []
 
         mode = getattr(config, 'EMAIL_TRACKING_MODE', 'CONFIG')
+        
+        # Pobieramy ustawienie kierunku (Domyślnie True = Najnowsze)
+        newest_first = getattr(config, 'PROCESS_FROM_NEWEST', True)
 
+        # --- 1. WYBÓR ŹRÓDŁA KONT ---
         if mode == 'ACCOUNTS' and sheets_handler:
             logging.info("🔄 Tryb pracy: ACCOUNTS (Pobieranie emaili z arkusza Google Sheets)")
             from carriers_sheet_handlers import EmailAvailabilityManager
@@ -458,8 +470,8 @@ class EmailHandler:
                 configs_to_check = email_configs
                 logging.info(f"✅ Wybrano {len(configs_to_check)} kont do sprawdzenia (z Accounts)")
             else:
-                logging.warning("⚠️ Arkusz Accounts jest pusty lub niedostępny. Fallback do CONFIG.")
-                configs_to_check = all_configs
+                logging.warning("⚠️ Arkusz Accounts jest pusty lub niedostępny. Kończę pracę w tym cyklu.")
+                return [] 
         else:
             if mode == 'ACCOUNTS' and not sheets_handler:
                  logging.warning("⚠️ Tryb ACCOUNTS wymaga sheets_handler, ale go brak. Używam trybu CONFIG.")
@@ -467,6 +479,7 @@ class EmailHandler:
             logging.info("🔄 Tryb pracy: CONFIG (Wszystkie maile z pliku)")
             configs_to_check = all_configs
 
+        # --- 2. POBIERANIE I SORTOWANIE ---
         emails = self.fetch_new_emails(email_configs_override=configs_to_check)
         processed_data = []
         
@@ -475,26 +488,31 @@ class EmailHandler:
             email_date = self.extract_email_date(email_msg)
             emails_with_dates.append((email_source, email_msg, email_date))
         
-        emails_with_dates.sort(key=lambda x: x[2] if x[2] else "1900-01-01 00:00:00", reverse=True)
+        # ✅ LOGIKA SORTOWANIA Z CONFIGA
+        # reverse=True -> Najnowsze pierwsze (Data malejąco)
+        # reverse=False -> Najstarsze pierwsze (Data rosnąco)
+        emails_with_dates.sort(key=lambda x: x[2] if x[2] else "1900-01-01 00:00:00", reverse=newest_first)
         
-        logging.info(f"📧 Przetwarzanie {len(emails_with_dates)} emaili od NAJNOWSZYCH do najstarszych")
+        sort_info = "NAJNOWSZYCH do najstarszych" if newest_first else "NAJSTARSZYCH do najnowszych"
+        logging.info(f"📧 Przetwarzanie {len(emails_with_dates)} emaili od {sort_info}")
         
+        processed_users = set() 
+
         for email_source, email_msg, email_date in emails_with_dates:
             try:
-                logging.info(f"🕐 Przetwarzanie emaila z daty: {email_date} (najnowsze pierwsze)")
+                logging.info(f"🕐 Przetwarzanie emaila z daty: {email_date}")
                 
                 try:
                     raw_subject = email_msg.get("Subject", "Brak tematu")
                     subject = self.decode_email_subject(raw_subject)
                 except Exception as e:
-                    logging.warning(f"⚠️ Błąd podczas dekodowania tematu: {e}")
+                    logging.warning(f"⚠️ Błąd dekodowania: {e}")
                     subject = str(email_msg.get("Subject", "Brak tematu"))
                 
                 body = self.get_email_body(email_msg)
-                
                 to_header = email_msg.get("To", "")
+                
                 email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', to_header)
-                # ✅ POPRAWKA: Normalizacja adresu email do małych liter!
                 recipient = email_match.group(0).lower() if email_match else None
                 recipient_name = self.extract_recipient_name(to_header)
 
@@ -502,26 +520,26 @@ class EmailHandler:
                     name_match = re.search(r"Witaj,\s*([\w\s]+)\s*user", body)
                     if name_match:
                         user_name = name_match.group(1).strip().lower()
-                        logging.info(f"Znaleziono nazwę użytkownika w treści: {user_name}")
                         recipient = f"{user_name}@gmail.com"
                     else:
-                        # ✅ POPRAWKA: Fallback też wymusza małe litery
-                        if email_source == "gmail":
-                            recipient = config.GMAIL_EMAIL.lower()
-                        else:
-                            recipient = config.INTERIA_EMAIL.lower()
-                        logging.info(f"Użyto domyślnego adresu: {recipient}")
+                        if email_source == "gmail": recipient = config.GMAIL_EMAIL.lower()
+                        else: recipient = config.INTERIA_EMAIL.lower()
 
-                user_key = None
-                if recipient:
-                    user_key = recipient.split('@')[0].lower()
-                    logging.info(f"Użyto klucza użytkownika: {user_key}")
+                user_key = recipient.split('@')[0].lower() if recipient else "unknown"
+                logging.info(f"Użyto klucza użytkownika: {user_key}")
+
+                # --- 3. LOGIKA POMIJANIA ---
+                # Pomijamy TYLKO wtedy, gdy idziemy od Najnowszych (żeby nie nadpisać nowych starymi).
+                # Jeśli idziemy od Najstarszych, przetwarzamy wszystko, żeby w arkuszu został stan końcowy (najnowszy).
+                if newest_first and user_key in processed_users:
+                    logging.info(f"⏭️ Pomijam starszy email dla użytkownika {user_key} (Nowszy już przetworzony)")
+                    continue
 
                 if not email_date:
                     logging.warning("Brak daty w nagłówku emaila - pomijam")
                     continue  
                     
-                logging.info(f"📧 Analiza NAJNOWSZEGO: {email_date} | {user_key} | {subject[:30]}...")
+                logging.info(f"📧 Analiza: {email_date} | {user_key} | {subject[:30]}...")
                 
                 processed = self.analyze_email(
                     subject, body, recipient, email_source, 
@@ -533,14 +551,10 @@ class EmailHandler:
                     processed["user_key"] = user_key
                     processed_data.append(processed)
                     
-                    logging.info(f"✅ Przetworzono NAJNOWSZY email z {email_date}: {subject[:50]}")
+                    logging.info(f"✅ Przetworzono email z {email_date}: {subject[:50]}")
                     
-                    processed_users = set()
-                    if user_key not in processed_users:
-                        processed_users.add(user_key)
-                    else:
-                        logging.info(f"⏭️ Pomijam starszy email dla użytkownika {user_key}")
-                        continue
+                    # Zapamiętujemy usera
+                    processed_users.add(user_key)
                         
                 else:
                     logging.info(f"⏭️ Email z {email_date} pominięty (starszy lub nieobsługiwany)")
@@ -548,7 +562,7 @@ class EmailHandler:
             except Exception as e:
                 logging.error(f"❌ Błąd podczas przetwarzania e-maila z {email_date}: {e}")
         
-        logging.info(f"📊 PODSUMOWANIE: Przetworzono {len(processed_data)} z {len(emails_with_dates)} emaili (najnowsze pierwsze)")
+        logging.info(f"📊 PODSUMOWANIE: Przetworzono {len(processed_data)} z {len(emails_with_dates)} emaili")
         return processed_data
 
     def extract_recipient_name(self, header):

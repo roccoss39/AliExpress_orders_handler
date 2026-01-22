@@ -20,6 +20,10 @@ import config
 from diagnostic_menu import show_diagnostic_menu
 from reprocess_manager import run_reprocess
 
+import argparse
+import os 
+from health_check import stop_health_server
+    
 # ==========================================
 # 🔧 KONFIGURACJA LOGOWANIA
 # ==========================================
@@ -155,28 +159,39 @@ def main_loop():
             if loop_counter % 100 == 0:
                 logging.info(f"📊 STATYSTYKI: {get_stats()}")
 
-            # 8. Oczekiwanie
-            sleep_time = getattr(config, 'CHECK_INTERVAL', 5) * 60
+            # 8. INTELIGENTNE OCZEKIWANIE (Smart Sleep)
+            # To naprawia problem z Ctrl+C
+            sleep_minutes = getattr(config, 'CHECK_INTERVAL', 5)
+            sleep_seconds = sleep_minutes * 60
             if getattr(config, 'QUICK_CHECK', False):
-                sleep_time = getattr(config, 'TEST_INTERVAL', 300)
+                sleep_seconds = getattr(config, 'TEST_INTERVAL', 300)
                 
-            logging.info(f"💤 Usypianie na {sleep_time}s...")
-            time.sleep(sleep_time)
+            logging.info(f"💤 Usypianie na {sleep_seconds}s (Naciśnij Ctrl+C aby przerwać)...")
+            
+            # Sprawdzamy co sekundę, czy nie ma żądania wyjścia
+            for _ in range(int(sleep_seconds)):
+                if is_shutdown_requested():
+                    logging.info("🛑 Wykryto żądanie zamknięcia podczas drzemki.")
+                    break
+                time.sleep(1)
                 
         except Exception as e:
-            # Obsługa błędów krytycznych
             logging.error(f"🔥 Krytyczny błąd w pętli: {e}")
             logging.error(traceback.format_exc())
             telegram.send_error_message(f"Błąd pętli: {str(e)}")
             time.sleep(60)
     
     set_main_loop_running(False)
+    
+    # Dodatkowe wywołanie stopu serwera (dla pewności, jeśli wyjdziemy z pętli while)
+    from health_check import stop_health_server
+    stop_health_server()
+    
     logging.info('🏁 Bot zakończył pracę.')
     telegram.send_message("🛑 Bot wyłączony.")
 
 if __name__ == "__main__":
-    import argparse
-    
+
     parser = argparse.ArgumentParser(description="AliExpress Order Tracker")
     parser.add_argument("--menu", action="store_true", help="Uruchom menu diagnostyczne")
     parser.add_argument("--reprocess-email", type=str, help="Wymuś ponowne przetworzenie maili dla podanego adresu")
@@ -192,4 +207,23 @@ if __name__ == "__main__":
         
     else:
         print("Uruchamianie głównej pętli. Naciśnij Ctrl+C aby zatrzymać.")
-        main_loop()
+        try:
+            main_loop()
+        except KeyboardInterrupt:
+            logging.info("\n🛑 Wykryto Ctrl+C. Zamykanie...")
+        except Exception as e:
+            logging.error(f"🔥 Nieoczekiwany błąd krytyczny: {e}")
+            traceback.print_exc()
+        finally:
+            logging.info("🔌 Sprzątanie po zamknięciu...")
+            
+            # Próba grzecznego zamknięcia serwera (dla zwolnienia portu)
+            try:
+                stop_health_server()
+            except:
+                pass
+            
+            logging.info("💀 WYMUSZENIE ZAMKNIĘCIA PROCESU (os._exit)")
+            # To jest "strzał w głowę" dla procesu. 
+            # Nie czeka na wątki, zamyka wszystko natychmiast.
+            os._exit(0)

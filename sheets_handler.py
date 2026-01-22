@@ -5,8 +5,8 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta
-from carriers_sheet_handlers import InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier
-
+from carriers_sheet_handlers import Col, InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier
+ 
 class SheetsHandler:
     _instance = None
     _spreadsheet = None
@@ -27,6 +27,7 @@ class SheetsHandler:
         self.spreadsheet = None
         self.worksheet = None
         self.connected = False
+        self.deleted_users_cache = {}
         self.carriers = {}
         self.last_mapping_refresh = 0
     
@@ -101,40 +102,93 @@ class SheetsHandler:
 
     def handle_order_update(self, order_data):
         """
-        Główna metoda sterująca.
-        Logika: 1 Email = 1 Wiersz.
+        Aktualizuje zamówienie, archiwizuje i zapobiega 'powrotom' usuniętych userów.
         """
-        if not self.connected and not self.connect(): return False
-
-        status = order_data.get("status")
-        carrier_name = order_data.get("carrier", "InPost")
+        import time # Upewnij się, że time jest zaimportowane
         
-        logging.info(f"🔄 Przetwarzanie statusu: {status} (Przewoźnik: {carrier_name})")
+        order_number = order_data.get('order_number')
+        new_status = order_data.get('status', 'Unknown')
+        
+        # Pobieramy email/user_key wcześniej, bo będzie potrzebny w obu miejscach
+        email_val = order_data.get('email') or order_data.get('user_key')
 
-        # 1. Znajdź wiersz (Priorytet: Email)
-        row_idx = self.find_order_row(order_data)
+        # 1. Znajdź wiersz
+        row_index = self.find_order_row(order_data)
+        
+        if row_index:
+            # --- A. LOGIKA PRIORYTETÓW ---
+            try:
+                status_col_idx = Col.STATUS 
+                current_status = self.worksheet.cell(row_index, status_col_idx).value
+                current_prio = self._get_status_priority(current_status)
+                new_prio = self._get_status_priority(new_status)
+                
+                logging.info(f"⚖️ Porównanie statusów: '{current_status}' ({current_prio}) vs '{new_status}' ({new_prio})")
 
-        # 2. Aktualizacja (jeśli znaleziono)
-        if row_idx:
-            logging.info(f"📝 Znaleziono wiersz {row_idx}. Aktualizuję.")
-            success = self._update_existing_row(row_idx, order_data)
+                if new_prio < current_prio:
+                    logging.warning(f"⛔ Blokada aktualizacji! '{new_status}' < '{current_status}'.")
+                    return 
+            except Exception as e:
+                logging.error(f"⚠️ Błąd priorytetów: {e}")
             
-            # Jeśli dostarczono -> Archiwizuj
-            if status == "delivered" and success:
-                logging.info(f"📦 Status 'delivered'. Przenoszę do archiwum...")
-                self.move_row_to_delivered(row_idx, order_data)
-                
-                email = order_data.get("email") or self.worksheet.cell(row_idx, 1).value
-                self.remove_account_from_list(email)
-                self.remove_user_mapping(email)
-                
-                self.worksheet.delete_rows(row_idx)
-            return True
+            # --- B. AKTUALIZACJA ---
+            logging.info(f"📝 Znaleziono wiersz {row_index}. Aktualizuję.")
+            self.update_row_cells(row_index, order_data) 
 
-        # 3. Tworzenie (jeśli nie znaleziono)
+            # --- C. AUTOMATYCZNA ARCHIWIZACJA ---
+            final_keywords = ['delivered', 'dostarczona', 'odebrana', 'zwrócona', 'picked up', 'zamknięte']
+            is_final = any(k in str(new_status).lower() for k in final_keywords)
+
+            if is_final:
+                logging.info(f"📦 Wykryto status końcowy: '{new_status}'. Rozpoczynam archiwizację...")
+                time.sleep(2)
+                
+                try:
+                    moved = self.move_row_to_delivered(row_index)
+                    
+                    if moved:
+                        # Uzupełnienie maila z arkusza, jeśli brak w danych
+                        if not email_val:
+                            email_val = self.worksheet.cell(row_index, Col.EMAIL).value
+
+                        pkg_val = order_data.get('package_number')
+                        ord_val = order_data.get('order_number')
+
+                        # 3. CZYSZCZENIE MAPOWANIA
+                        if email_val and hasattr(self, 'email_handler') and self.email_handler:
+                            logging.info(f"🧹 Zlecam usunięcie: {email_val} (Pkg: {pkg_val}, Zam: {ord_val})")
+                            self.email_handler.remove_user_mapping(email_val, pkg_val, ord_val)
+                            
+                            # ✅ DODAJEMY DO CACHE: Zapamiętaj, że ten user został właśnie wyczyszczony
+                            # Zapisujemy czas, żeby blokada trwała np. 60 sekund
+                            self.deleted_users_cache[str(email_val).lower()] = time.time()
+
+                        # 4. Usuń wiersz
+                        self.worksheet.delete_rows(row_index)
+                        logging.info(f"🗑️ Usunięto wiersz {row_index} z głównej listy.")
+                    else:
+                        logging.error("❌ Nie udało się przenieść wiersza, przerywam usuwanie.")
+
+                except Exception as e:
+                    logging.error(f"❌ Błąd podczas auto-archiwizacji: {e}")
+                    import traceback
+                    traceback.print_exc()
+
         else:
-            logging.info("🆕 Nie znaleziono wiersza dla tego maila. Tworzę nowy.")
-            return self._direct_create_row(order_data)
+            # --- D. TWORZENIE NOWEGO (Z BLOKADĄ) ---
+            
+            # Sprawdzamy, czy ten user nie został usunięty w ciągu ostatnich 60 sekund
+            if email_val:
+                user_key_str = str(email_val).lower()
+                last_deleted = self.deleted_users_cache.get(user_key_str, 0)
+                
+                # Jeśli usunięto mniej niż 60 sekund temu -> BLOKUJEMY
+                if time.time() - last_deleted < 60:
+                    logging.warning(f"🛑 ZABLOKOWANO utworzenie wiersza dla {email_val} - użytkownik został usunięty chwilę temu!")
+                    return
+
+            logging.info("🆕 Nie znaleziono wiersza. Tworzę nowy.")
+            self.append_order(order_data)
 
     def find_order_row(self, order_data):
         """Znajduje numer wiersza na podstawie adresu email."""
@@ -385,3 +439,154 @@ class SheetsHandler:
         if not phone: return ""
         d = re.sub(r'\D', '', phone)[-9:]
         return f"{d[:3]}-{d[3:6]}-{d[6:]}" if len(d)==9 else d
+    
+    def _get_status_priority(self, status_text):
+        """Zwraca priorytet statusu (im wyższa liczba, tym ważniejszy status)."""
+        if not status_text: return 0
+        status = str(status_text).lower()
+        
+        if "unknown" in status or "nieznan" in status: return 0
+        if "confirmed" in status or "zatwierdzon" in status or "potwierdzon" in status: return 1
+        if "transit" in status or "transporcie" in status or "drodze" in status: return 2
+        if "shipment_sent" in status or "nadan" in status: return 3
+        if "pickup" in status or "odbioru" in status or "awizo" in status or "placówce" in status: return 4
+        if "delivered" in status or "dostarczon" in status or "odebran" in status: return 5
+        # Closed i Canceled mają najwyższy priorytet, bo kończą cykl definitywnie
+        if "closed" in status or "zamknięte" in status: return 6
+        if "canceled" in status or "anulowan" in status or "zwrot" in status: return 6
+        return 0
+    
+    def append_order(self, order_data):
+        """
+        Dodaje nowy wiersz z zamówieniem na koniec arkusza.
+        Mapuje dane ze słownika order_data na kolumny zdefiniowane w klasie Col.
+        """
+        try:
+            # Tworzymy pustą listę o długości odpowiadającej ostatniej kolumnie (P = 16)
+            # Dzięki temu zachowujemy strukturę arkusza
+            row = [''] * 16  
+            
+            # Helper do bezpiecznego pobierania danych
+            def get_val(key):
+                return str(order_data.get(key, '') or '')
+
+            # Wypełnianie danych (Pamiętaj: Col.NAZWA to indeks 1-based, a lista w Pythonie to 0-based)
+            # Dlatego odejmujemy 1 od każdego indeksu Col.
+            
+            # 1. Email / Użytkownik
+            # Jeśli nie ma pełnego maila w danych, używamy user_key
+            email_val = order_data.get('email')
+            if not email_val:
+                email_val = order_data.get('user_key', 'Unknown')
+            row[Col.EMAIL - 1] = email_val
+
+            # 2. Produkt
+            row[Col.PRODUCT - 1] = get_val('product_name')
+            
+            # 3. Adres (zazwyczaj puste przy statusach, ale zostawiamy miejsce)
+            row[Col.ADDRESS - 1] = '' 
+            
+            # 4. Telefon
+            row[Col.PHONE - 1] = ''
+            
+            # 5. Kod odbioru
+            row[Col.PICKUP_CODE - 1] = get_val('pickup_code')
+            
+            # 6. Deadline
+            row[Col.DEADLINE - 1] = ''
+            
+            # 7. Godziny
+            row[Col.HOURS - 1] = ''
+            
+            # 8. Data wiadomości (Ostatnia aktualizacja)
+            row[Col.MSG_DATE - 1] = get_val('email_date')
+            
+            # 9. Status
+            row[Col.STATUS - 1] = get_val('status')
+            
+            # 10. Data zamówienia (Wstawiamy bieżącą, bo to nowy wpis w arkuszu)
+            # Jeśli wolisz datę z maila jako datę zamówienia, zmień na get_val('email_date')
+            row[Col.ORDER_DATE - 1] = datetime.now().strftime('%Y-%m-%d %H:%M')
+            
+            # 11. Przewidywana dostawa
+            row[Col.EST_DELIVERY - 1] = ''
+            
+            # 12. QR Link
+            row[Col.QR - 1] = get_val('qr_link')
+            
+            # 13. Numer Zamówienia (Kluczowe!)
+            row[Col.ORDER_NUM - 1] = get_val('order_number')
+            
+            # 14. Info / Przewoźnik
+            # Jeśli w danych nie ma pola 'carrier', wpisujemy domyślnie 'AliExpress' lub wyciągamy z tematu
+            carrier = order_data.get('carrier', 'AliExpress')
+            row[Col.INFO - 1] = carrier
+            
+            # 15. Numer Paczki (Tracking)
+            row[Col.PKG_NUM - 1] = get_val('package_number')
+            
+            # 16. Link do śledzenia
+            row[Col.LINK - 1] = get_val('tracking_link')
+
+            # --- ZAPIS DO ARKUSZA ---
+            self.worksheet.append_row(row)
+            logging.info(f"🆕 Dodano nowy wiersz dla zamówienia {get_val('order_number')} (User: {email_val})")
+            
+        except Exception as e:
+            logging.error(f"❌ Błąd krytyczny w append_order: {e}")
+            # Opcjonalnie: print tracebacku dla debugowania
+            import traceback
+            traceback.print_exc()
+
+    def update_row_cells(self, row_index, order_data):
+        """
+        Aktualizuje wybrane komórki w istniejącym wierszu.
+        Używa update_cells dla oszczędności API.
+        """
+        try:
+            cells_to_update = []
+            
+            # Funkcja pomocnicza: dodaje komórkę do listy aktualizacji tylko gdy mamy dane
+            def add_cell(col_idx, key):
+                val = order_data.get(key)
+                # Aktualizujemy tylko, jeśli wartość nie jest None
+                if val is not None: 
+                    # Tworzymy obiekt gspread.Cell(wiersz, kolumna, wartość)
+                    cells_to_update.append(
+                        gspread.Cell(row_index, col_idx, str(val))
+                    )
+
+            # --- MAPOWANIE DANYCH DO KOLUMN ---
+            
+            # 1. STATUS (Kluczowe)
+            add_cell(Col.STATUS, 'status')
+            
+            # 2. Data Wiadomości (Aktualizujemy zawsze przy nowym mailu)
+            add_cell(Col.MSG_DATE, 'email_date')
+            
+            # 3. Kod Odbioru (Często dochodzi później)
+            add_cell(Col.PICKUP_CODE, 'pickup_code')
+            
+            # 4. Numer Paczki (Może się zmienić lub pojawić później)
+            add_cell(Col.PKG_NUM, 'package_number')
+            
+            # 5. Link do śledzenia
+            add_cell(Col.LINK, 'tracking_link')
+            
+            # 6. Kod QR (Link)
+            add_cell(Col.QR, 'qr_link')
+            
+            # 7. Przewoźnik (Info) - jeśli się zmienił
+            add_cell(Col.INFO, 'carrier')
+
+            # --- WYSŁANIE ZMIAN DO GOOGLE ---
+            if cells_to_update:
+                self.worksheet.update_cells(cells_to_update)
+                logging.info(f"✅ Zaktualizowano {len(cells_to_update)} pól w wierszu {row_index}")
+            else:
+                logging.info(f"ℹ️ Brak nowych danych do aktualizacji w wierszu {row_index}")
+
+        except Exception as e:
+            logging.error(f"❌ Błąd w update_row_cells: {e}")
+            import traceback
+            traceback.print_exc()

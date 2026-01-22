@@ -9,6 +9,14 @@ load_dotenv(override=True)
 # 'ACCOUNTS' - sprawdza tylko maile wpisane w zakładce "Accounts" w Google Sheets
 EMAIL_TRACKING_MODE = 'ACCOUNTS'
 
+# Kierunek przetwarzania maili
+# True  = (Domyślnie) Od NAJNOWSZYCH do najstarszych. 
+#         Szybkie. Bierze tylko ostatni status paczki i ignoruje starsze maile w tym samym cyklu.
+# False = Od NAJSTARSZYCH do najnowszych.
+#         Wolniejsze. Przetwarza historię po kolei (np. Wysłano -> W drodze -> Dostarczono).
+#         Używaj False, jeśli chcesz odtworzyć pełną historię w logach lub arkuszu.
+PROCESS_FROM_NEWEST = False
+
 # Normal work : True
 # True  = Sprawdza tylko te z "kropką" (UNSEEN). Szybkie, oszczędne.
 # False = Sprawdza WSZYSTKIE maile z zakresu dat (nawet te otwarte). Wolniejsze, ale pewniejsze.
