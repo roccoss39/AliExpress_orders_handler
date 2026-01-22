@@ -492,23 +492,20 @@ class SheetsHandler:
     
     def append_order(self, order_data):
         """
-        Dodaje nowy wiersz z zamówieniem na koniec arkusza.
-        Mapuje dane ze słownika order_data na kolumny zdefiniowane w klasie Col.
+        Dodaje nowy wiersz, zapisuje WSZYSTKIE bogate dane z AI i nadaje kolor.
         """
+        from datetime import datetime
+        import time
+        
         try:
             # Tworzymy pustą listę o długości odpowiadającej ostatniej kolumnie (P = 16)
-            # Dzięki temu zachowujemy strukturę arkusza
             row = [''] * 16  
             
             # Helper do bezpiecznego pobierania danych
             def get_val(key):
                 return str(order_data.get(key, '') or '')
 
-            # Wypełnianie danych (Pamiętaj: Col.NAZWA to indeks 1-based, a lista w Pythonie to 0-based)
-            # Dlatego odejmujemy 1 od każdego indeksu Col.
-            
             # 1. Email / Użytkownik
-            # Jeśli nie ma pełnego maila w danych, używamy user_key
             email_val = order_data.get('email')
             if not email_val:
                 email_val = order_data.get('user_key', 'Unknown')
@@ -517,58 +514,81 @@ class SheetsHandler:
             # 2. Produkt
             row[Col.PRODUCT - 1] = get_val('product_name')
             
-            # 3. Adres (zazwyczaj puste przy statusach, ale zostawiamy miejsce)
-            row[Col.ADDRESS - 1] = '' 
+            # 3. ✅ Adres (Teraz zapisujemy to co dało AI!)
+            # AI zwraca 'delivery_address' (dla zamówień) lub 'pickup_location' (dla odbioru)
+            row[Col.ADDRESS - 1] = get_val('delivery_address') or get_val('pickup_location')
             
-            # 4. Telefon
-            row[Col.PHONE - 1] = ''
+            # 4. ✅ Telefon (Twój lub kuriera)
+            # Priorytet: Telefon kuriera -> Twój telefon -> Puste
+            row[Col.PHONE - 1] = get_val('courier_phone') or get_val('phone_number')
             
             # 5. Kod odbioru
             row[Col.PICKUP_CODE - 1] = get_val('pickup_code')
             
-            # 6. Deadline
-            row[Col.DEADLINE - 1] = ''
+            # 6. ✅ Deadline (Data odbioru)
+            row[Col.DEADLINE - 1] = get_val('pickup_deadline')
             
-            # 7. Godziny
-            row[Col.HOURS - 1] = ''
+            # 7. ✅ Godziny otwarcia punktu
+            row[Col.HOURS - 1] = get_val('available_hours')
             
-            # 8. Data wiadomości (Ostatnia aktualizacja)
+            # 8. Data wiadomości
             row[Col.MSG_DATE - 1] = get_val('email_date')
             
             # 9. Status
             row[Col.STATUS - 1] = get_val('status')
             
-            # 10. Data zamówienia (Wstawiamy bieżącą, bo to nowy wpis w arkuszu)
-            # Jeśli wolisz datę z maila jako datę zamówienia, zmień na get_val('email_date')
-            row[Col.ORDER_DATE - 1] = datetime.now().strftime('%Y-%m-%d %H:%M')
+            # 10. Data zamówienia (Zapisujemy datę z maila lub dzisiejszą)
+            order_date = get_val('order_date') or get_val('shipping_date')
+            if not order_date:
+                order_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+            row[Col.ORDER_DATE - 1] = order_date
             
-            # 11. Przewidywana dostawa
-            row[Col.EST_DELIVERY - 1] = ''
+            # 11. ✅ Przewidywana dostawa
+            row[Col.EST_DELIVERY - 1] = get_val('estimated_delivery') or get_val('expected_delivery_date')
             
             # 12. QR Link
-            row[Col.QR - 1] = get_val('qr_link')
+            row[Col.QR - 1] = get_val('qr_code') or get_val('qr_link')
             
-            # 13. Numer Zamówienia (Kluczowe!)
+            # 13. Numer Zamówienia
             row[Col.ORDER_NUM - 1] = get_val('order_number')
             
-            # 14. Info / Przewoźnik
-            # Jeśli w danych nie ma pola 'carrier', wpisujemy domyślnie 'AliExpress' lub wyciągamy z tematu
+            # 14. Info / Przewoźnik (Bogatsze info)
             carrier = order_data.get('carrier', 'AliExpress')
-            row[Col.INFO - 1] = carrier
+            info = order_data.get('info', '')
             
-            # 15. Numer Paczki (Tracking)
+            # Jeśli AI zwróciło imię kuriera, dodaj je do info
+            courier_name = get_val('courier_name')
+            if courier_name:
+                info = f"{info} (Kurier: {courier_name})".strip()
+
+            row[Col.INFO - 1] = f"{carrier} | {info}" if info and info != carrier else carrier
+            
+            # 15. Numer Paczki
             row[Col.PKG_NUM - 1] = get_val('package_number')
             
             # 16. Link do śledzenia
-            row[Col.LINK - 1] = get_val('tracking_link')
+            row[Col.LINK - 1] = get_val('tracking_link') or get_val('item_link')
 
             # --- ZAPIS DO ARKUSZA ---
             self.worksheet.append_row(row)
-            logging.info(f"🆕 Dodano nowy wiersz dla zamówienia {get_val('order_number')} (User: {email_val})")
+            logging.info(f"🆕 Dodano BOGATY wiersz dla zamówienia {get_val('order_number')}")
+            
+            # =================================================================
+            # 🎨 KOLOROWANIE
+            # =================================================================
+            try:
+                time.sleep(1) 
+                new_row_index = self.find_order_row(order_data)
+                
+                if new_row_index:
+                    logging.info(f"🎨 Nakładam kolory na nowy wiersz {new_row_index}...")
+                    self.update_row_cells(new_row_index, order_data)
+                    
+            except Exception as e:
+                logging.error(f"⚠️ Nie udało się pokolorować nowego wiersza: {e}")
             
         except Exception as e:
             logging.error(f"❌ Błąd krytyczny w append_order: {e}")
-            # Opcjonalnie: print tracebacku dla debugowania
             import traceback
             traceback.print_exc()
 

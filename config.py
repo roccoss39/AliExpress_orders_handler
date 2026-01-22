@@ -17,7 +17,7 @@ EMAIL_TRACKING_MODE = 'ACCOUNTS'
 # False = Od NAJSTARSZYCH do najnowszych.
 #         Wolniejsze. Przetwarza historię po kolei (np. Wysłano -> W drodze -> Dostarczono).
 #         Używaj False, jeśli chcesz odtworzyć pełną historię w logach lub arkuszu.
-PROCESS_FROM_NEWEST = False
+PROCESS_FROM_NEWEST = True
 
 # Normal work : True
 # True  = Sprawdza tylko te z "kropką" (UNSEEN). Szybkie, oszczędne.
@@ -27,16 +27,15 @@ CHECK_ONLY_UNSEEN = False
 # Czy przetwarzać również przeczytane maile? Tryb dla fun reprocess
 # True = Pobiera wszystko z ostatnich dni (UWAGA: zużywa więcej tokenów AI)
 # False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
-PROCESS_READ_EMAILS = True # Huge API calls
+PROCESS_READ_EMAILS = False # Huge API calls
 
 # Czy ignorować datę ostatniego sprawdzenia?
 # False = (Domyślnie) Bot pomija maile starsze niż te zapisane w historii. BEZPIECZNE.
 # True  = Bot przetwarza KAŻDY znaleziony mail, nawet stary. 
-# ⚠️ UWAGA: Ustawienie True może spowodować masowe wysyłanie powiadomień na Telegram!
-IGNORE_LAST_EMAIL_DATE_CHECK = True
+IGNORE_LAST_EMAIL_DATE_CHECK = False
 
 # Or Regrex if False
-USE_OPENAI_API = False 
+USE_OPENAI_API = True 
 
 # Ustawienia kont e-mail
 GMAIL_EMAIL = os.getenv('GMAIL_EMAIL_1')

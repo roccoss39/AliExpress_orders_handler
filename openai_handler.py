@@ -981,7 +981,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             prompt = f"""
             Przeanalizuj poniższy email od {carrier_name}. Email może dotyczyć jednego z etapów przesyłki:
 
-            1. NADANIE PRZESYŁKI - Email zawiera informację o nadaniu paczki.
+            1. NADANIE PRZESYŁKI - Email zawiera informację o nadaniu paczki. Tylko gdy paczka dotrze do POLSKI i zostanie przekaza dla kuriera jak INPOST, DPD, DHL, POCZTA POLSKA
             Z tego typu maila wyciągnij:
             - Ustaw status przesyłki: "shipment_sent" (OBOWIĄZKOWO)
             - Numer przesyłki od danego przewoźnika (package_number) - różne formaty:
@@ -1030,6 +1030,9 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             - Link do zamówienia (item_link)
             - Przewidywany czas dostawy (estimated_delivery)
 
+            5. TRANSIT - paczka po potwierdzeniu wyruszyla do Polski (mail od Aliexpress)
+            - Ustaw status przesyłki: "transit" (OBOWIĄZKOWO) 
+
             Nagłówek To: {to_header}
             Temat maila: {subject}
 
@@ -1038,11 +1041,11 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
 
             WAŻNE: 
             - OBOWIĄZKOWO zwróć odpowiedni status w polu "status" dla typu powiadomienia:
-              * "shipment_sent" - dla powiadomienia o nadaniu
+              * "shipment_sent" - dla powiadomienia o nadaniu - JESLI ZNASZ PRZEWOZNIKA I NIE JEST NIM ALIEXPRESS
               * "pickup" - jeśli paczka już dotarła i czeka na odbiór lub kurier dzisiaj doręczy (jeśli masz pick up code to na pewno jest do odbioru)
               * "delivered" - dla powiadomienia o dostarczeniu 
               * "confirmed" - dla potwierdzenia zamówienia
-              * "transit" - dla informacji o przesyłce w transporcie
+              * "transit" - dla informacji o przesyłce w transporcie - TYLKO JESLI MAIL OD ALIEXPRESS - czyli paczka wyruszyla do Poslki po potwierdzeniu zamowienia.
             - Format daty powinien być zawsze DD.MM.YYYY (np. 18.05.2025)
             - W polu email umieść adres email odbiorcy z nagłówka To
             - Jeśli nie możesz znaleźć niektórych danych, pozostaw te pola puste
@@ -1115,6 +1118,11 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
               "carrier": "{carrier_name}",
               "status": "confirmed"
             }}
+
+            5. TRANSIT:
+            {{
+            "status": "transit"
+            }}
             """
 
             # Dostosuj prompt dla AliExpress
@@ -1125,6 +1133,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                 - Link do zamówienia (zaczynający się od https://www.aliexpress.com/)
                 - Dane produktu - nazwa, cena, ilość
                 - Przewidywany czas dostawy
+                - CZY JUZ ZOSTALA WYSLANA - WTEDY ZMIANIASZ TYLKO STATUS NA TRANSIT
                 """
         
             # Dostosuj prompt dla InPost

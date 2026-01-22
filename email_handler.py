@@ -433,7 +433,7 @@ class EmailHandler:
             try:
                 new_dt = datetime.strptime(new_email_date, '%Y-%m-%d %H:%M:%S')
                 existing_dt = datetime.strptime(existing_email_date, '%Y-%m-%d %H:%M:%S')
-                should_update = new_dt > existing_dt
+                should_update = new_dt >= existing_dt # TO Change
             except ValueError:
                 logging.warning(f"Błąd formatu daty przy porównaniu: {new_email_date} vs {existing_email_date}. Aktualizuję dla bezpieczeństwa.")
                 return True
