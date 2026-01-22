@@ -96,7 +96,7 @@ EMAIL_CHECK_SETTINGS = {
 }
 
 # Czy wysyłać powiadomienia mailowe o odbiorze? (True = Tak, False = Nie)
-SEND_EMAIL_NOTIFICATIONS = False
+SEND_EMAIL_NOTIFICATIONS = True
 
 # --- TELEGRAM CONFIG ---
 ENABLE_TELEGRAM = True
