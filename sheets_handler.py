@@ -71,7 +71,6 @@ class SheetsHandler:
 
             for i, row in enumerate(all_values):
                 if i == 0: continue
-                # Sprawdź status w kolumnie I (indeks 8)
                 if len(row) > 8:
                     status = str(row[8]).lower()
                     keywords = ['dostarczona', 'odebrana', 'zwrócona', 'delivered', 'picked up']
@@ -81,18 +80,21 @@ class SheetsHandler:
 
             if rows_to_archive:
                 logging.info(f"Znaleziono {len(rows_to_archive)} zamówień do archiwizacji.")
+                # Odwrócona kolejność jest kluczowa przy usuwaniu!
                 for row_num, email in reversed(rows_to_archive):
                     logging.info(f"📦 Przetwarzanie wiersza {row_num} (Email: {email})")
+                    
+                    # move_delivered_order robi KOPIUJ I USUŃ. 
+                    # Nie musimy usuwać ręcznie drugi raz.
                     if self.move_row_to_delivered(row_num):
                         if email:
                             self.remove_account_from_list(email)
                             self.remove_user_mapping(email)
-                        try:
-                            self.worksheet.delete_rows(row_num)
-                            logging.info(f"🗑️ Usunięto wiersz {row_num}.")
-                            time.sleep(1.5)
-                        except Exception as e:
-                            logging.error(f"❌ Błąd usuwania wiersza: {e}")
+                        
+                        logging.info(f"🗑️ Zarchiwizowano wiersz {row_num}.")
+                        time.sleep(1.5)
+                    else:
+                        logging.error(f"❌ Nie udało się przenieść wiersza {row_num}")
             else:
                 logging.info("Brak starych zamówień do archiwizacji.")
         except Exception as e:
@@ -181,9 +183,7 @@ class SheetsHandler:
                                 except Exception as e:
                                     logging.error(f"❌ Błąd podczas usuwania z Accounts: {e}")
 
-                        # 4. Usuń wiersz z głównego arkusza
-                        self.worksheet.delete_rows(row_index)
-                        logging.info(f"🗑️ Usunięto wiersz {row_index} z głównej listy.")
+                        logging.info(f"🗑️ Wiersz {row_index} został przeniesiony i usunięty z głównej listy.")
                     else:
                         logging.error("❌ Nie udało się przenieść wiersza, przerywam usuwanie.")
 
@@ -380,7 +380,6 @@ class SheetsHandler:
                 self.move_row_to_delivered(new_row_idx, order_data)
                 self.remove_account_from_list(email)
                 self.remove_user_mapping(email)
-                self.worksheet.delete_rows(new_row_idx)
 
             return True
         except Exception as e:
