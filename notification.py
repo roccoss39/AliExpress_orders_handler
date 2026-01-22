@@ -13,7 +13,7 @@ def send_pickup_notification(order_data):
         msg['Subject'] = f"Paczka gotowa do odbioru: {order_data.get('package_number', 'brak numeru')}"
         
         body = f"""
-        Witaj,
+        Witaj!
         
         Twoja paczka o numerze {order_data.get('package_number', 'brak numeru')} jest gotowa do odbioru.
         

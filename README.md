@@ -1,6 +1,10 @@
 AliExpress & Multi-Carrier Order Tracker
 Zaawansowany, automatyczny system do śledzenia zamówień z AliExpress (i nie tylko) poprzez analizę wiadomości email i synchronizację z Arkuszem Google. System działa w trybie ciągłym (24/7), inteligentnie zarządzając statusami kont email i limitami API.
 
+Moje sugestie:
+1. Używać funkcji reprocess do odtwarzanie wszystkich maili z konta - sprawdzenie poprawnosci systemu.
+Przykład użycia: python3 main.py --reprocess-email jan.kowalski@interia.pl --limit 10
+
 🚀 Kluczowe Funkcjonalności
 🧠 Tryb Hybrydowy (AI + Regex):
 

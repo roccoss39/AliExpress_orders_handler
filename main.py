@@ -21,18 +21,17 @@ from diagnostic_menu import show_diagnostic_menu
 from reprocess_manager import run_reprocess
 
 # ==========================================
-# 🔧 KONFIGURACJA LOGOWANIA (POPRAWIONA)
+# 🔧 KONFIGURACJA LOGOWANIA
 # ==========================================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("aliexpress_tracker.log"), # Zapis do pliku
-        logging.StreamHandler(sys.stdout)              # ✅ Zapis na ekran (przywrócony)
+        logging.StreamHandler(sys.stdout)              # ✅ Zapis na ekran
     ]
 )
-# 🛡️ TO JEST KLUCZOWA POPRAWKA:
-# Zapobiega wywalaniu błędów BrokenPipe na ekran, gdy terminal przytnie
+# Zapobiega wywalaniu błędów BrokenPipe na ekran
 logging.raiseExceptions = False 
 logging.getLogger('openai').setLevel(logging.WARNING)
 
@@ -51,6 +50,10 @@ def main_loop():
     email_handler = EmailHandler()
     sheets_handler = SheetsHandler()
     
+    # 🔌 Wstrzyknięcie email_handler do sheets_handler
+    # Pozwala to arkuszowi czyścić lokalne mapowania przy archiwizacji
+    sheets_handler.email_handler = email_handler
+    
     set_handlers(email_handler, sheets_handler)
     set_main_loop_running(True)
     
@@ -63,7 +66,7 @@ def main_loop():
     except Exception as e:
         logging.warning(f'⚠️ Nie udało się uruchomić health check: {e}')
         
-    logging.info("🚀 Bot wystartował (Tryb ACCOUNTS/CONFIG).")
+    logging.info("🚀 Bot wystartował (Tryb PROSTY: 1 Email = 1 Wiersz).")
 
     first_run = True
     last_duplicate_check = 0 
@@ -112,27 +115,24 @@ def main_loop():
                     send_pickup_notification(order_data)
 
                 # ✅ GŁÓWNA AKTUALIZACJA ARKUSZA
+                # Teraz sheets_handler robi wszystko: tworzy, aktualizuje, archiwizuje, czyści konta.
                 limiters.wait_for("sheets_write")
                 sheets_handler.handle_order_update(order_data)
 
-                # Sprzątanie po dostarczeniu (usuwanie mapowań)
+                # ✅ CZYSZCZENIE LOKALNEGO PLIKU JSON
+                # SheetsHandler czyści arkusz, a my tutaj doczyszczamy pamięć bota
                 if order_data.get("status") == "delivered":
                     user_key = order_data.get("user_key")
-                    logging.info(f"🧹 Status 'delivered'. Usuwam mapowanie dla {user_key}...")
+                    logging.info(f"🧹 Status 'delivered'. Usuwam lokalne mapowanie dla {user_key}...")
                     
-                    user_deleted = email_handler.remove_user_mapping(
+                    email_handler.remove_user_mapping(
                         user_key,
                         order_data.get("package_number"),
                         order_data.get("order_number")
                     )
-                    
-                    # Jeśli user pusty -> zwolnij konto w Accounts
-                    if user_deleted:
-                        email_address = order_data.get("email")
-                        if email_address:
-                            EmailAvailabilityManager(sheets_handler).free_up_account(email_address)
+                    # UWAGA: Usunięto stąd free_up_account, bo SheetsHandler robi to automatycznie
 
-            # 6. Aktualizacja kolorów w Accounts (jeśli były zmiany lub to pierwszy start)
+            # 6. Aktualizacja kolorów w Accounts (tylko kosmetyka)
             if len(processed_emails) > 0 or first_run:
                 limiters.wait_for("sheets_read")
                 logging.info("🎨 Aktualizacja statusów kont w arkuszu...")
@@ -140,7 +140,8 @@ def main_loop():
                     EmailAvailabilityManager(sheets_handler).check_email_availability()
                     logging.info("✅ Statusy odświeżone.")
                 except Exception as e:
-                    logging.error(f"❌ Błąd statusów: {e}")
+                    # Ignorujemy błędy tutaj, żeby nie zatrzymywać bota
+                    pass
                 
                 first_run = False
             

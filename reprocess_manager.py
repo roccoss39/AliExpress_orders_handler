@@ -3,6 +3,7 @@ from email_handler import EmailHandler
 from sheets_handler import SheetsHandler
 from carriers_sheet_handlers import EmailAvailabilityManager
 
+#example use: python3 main.py --reprocess-email jan.kowalski@interia.pl --limit 10
 def run_reprocess(target_email, limit=None):
     """
     Wymusza ponowne pobranie maili dla konkretnego adresu.
