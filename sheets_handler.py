@@ -103,100 +103,71 @@ class SheetsHandler:
     # --- GLÓWNA LOGIKA ---
 
     def handle_order_update(self, order_data, telegram_notifier=None):
-        import time
-        try:
-            from carriers_sheet_handlers import EmailAvailabilityManager
-        except ImportError:
-            pass
+        """
+        Główna funkcja aktualizacji i archiwizacji zamówień.
+        """
 
         new_status = order_data.get('status', 'Unknown')
-        # Pobieramy i czyścimy email
         raw_email = order_data.get('email') or order_data.get('user_key')
         email_val = str(raw_email).strip().lower() if raw_email else None
 
         row_index = self.find_order_row(order_data)
         
         if row_index:
-            # ... (logika priorytetów bez zmian) ...
+            # 1. Sprawdzenie priorytetów
+            try:
+                status_col_idx = Col.STATUS 
+                current_status = self.worksheet.cell(row_index, status_col_idx).value
+                if self._get_status_priority(new_status) < self._get_status_priority(current_status):
+                    logging.warning(f"⛔ Blokada aktualizacji statusu! '{new_status}' < '{current_status}'.")
+                    return 
+            except: pass
             
-            logging.info(f"📝 Znaleziono wiersz {row_index}. Aktualizuję.")
+            # 2. Aktualizacja komórek
+            logging.info(f"📝 Aktualizuję wiersz {row_index} dla {email_val}")
             self.update_row_cells(row_index, order_data)
             
             if telegram_notifier:
                 telegram_notifier.send_new_package_alert(order_data)
 
-            # --- ARCHIWIZACJA I CZYSZCZENIE ---
+            # 3. Archiwizacja (jeśli status końcowy)
             final_keywords = ['delivered', 'dostarczona', 'odebrana', 'zwrócona', 'picked up', 'zamknięte']
-            is_final = any(k in str(new_status).lower() for k in final_keywords)
-
-            if is_final:
-                logging.info(f"📦 Status końcowy '{new_status}'. Archiwizacja...")
-                time.sleep(2)
+            if any(k in str(new_status).lower() for k in final_keywords):
+                logging.info(f"📦 Status końcowy. Rozpoczynam czyszczenie dla {email_val}...")
+                time.sleep(1.5)
                 
-                # Pobieramy email z danych lub z arkusza
                 if not email_val:
-                    cell_val = self.worksheet.cell(row_index, Col.EMAIL).value
-                    email_val = str(cell_val).strip().lower() if cell_val else None
+                    email_val = str(self.worksheet.cell(row_index, Col.EMAIL).value).strip().lower()
 
-                try:
-                    moved = self.move_row_to_delivered(row_index)
-                    
-                    if moved:
-                        logging.info(f"🗑️ Wiersz {row_index} zarchiwizowany.")
-                        
-                        # ====================================================
-                        # 🕵️‍♂️ FIX: POPRAWNE CZYSZCZENIE JSON
-                        # ====================================================
-                        if email_val and hasattr(self, 'email_handler') and self.email_handler:
-                            # 1. Konwertujemy email na klucz (np. usuwamy @interia.pl)
-                            user_key_to_clean = self.get_user_key(email_val)
-                            
-                            logging.info(f"🚀 DEBUG: Próba NUKLEARNEGO czyszczenia JSON dla klucza: '{user_key_to_clean}'")
-                            
-                            # 2. Wywołujemy usuwanie używając poprawnego klucza
-                            success = self.email_handler.remove_user_mapping(user_key_to_clean)
-                            
-                            if success:
-                                logging.info(f"✅ DEBUG: remove_user_mapping pomyślnie usunęło '{user_key_to_clean}'")
-                            else:
-                                logging.warning(f"⚠️ DEBUG: remove_user_mapping nie znalazło klucza '{user_key_to_clean}'")
-                        else:
-                            logging.error(f"❌ DEBUG: Brak dostępu do email_handler lub brak emaila")
+                if self.move_row_to_delivered(row_index):
+                    # CZYSZCZENIE JSON (Nuklearne)
+                    if email_val and hasattr(self, 'email_handler') and self.email_handler:
+                        user_key = self.get_user_key(email_val)
+                        self.email_handler.remove_user_mapping(user_key)
 
-                        # ====================================================
-                        # CZYSZCZENIE ACCOUNTS
-                        # ====================================================
-                        if email_val:
-                            # Używamy pełnego maila do szukania w arkuszu Accounts
-                            self.deleted_users_cache[email_val] = time.time()
-                            try:
-                                acct_manager = EmailAvailabilityManager(self)
-                                acct_manager.free_up_account(email_val)
-                                logging.info(f"✅ Usunięto konto {email_val} z Accounts.")
-                            except Exception as e:
-                                logging.warning(f"⚠️ Błąd Accounts (możliwe w trybie reprocess): {e}")
-
-                    else:
-                        logging.error("❌ Nie udało się przenieść wiersza.")
-
-                except Exception as e:
-                    # To tutaj wcześniej wpadał błąd 'load_mappings'
-                    logging.error(f"❌ Krytyczny błąd podczas czyszczenia: {e}")
+                    # CZYSZCZENIE ACCOUNTS
+                    if email_val:
+                        self.deleted_users_cache[email_val] = time.time()
+                        try:
+                            acct_manager = EmailAvailabilityManager(self)
+                            acct_manager.free_up_account(email_val)
+                        except Exception as e:
+                            logging.warning(f"⚠️ Nie można usunąć z Accounts (prawdopodobnie tryb reprocess): {e}")
+                else:
+                    logging.error("❌ Nie udało się zarchiwizować wiersza.")
 
         else:
-            # ... (Reszta kodu: Duchy i Nowe Wiersze bez zmian) ...
+            # 4. Obsługa nowych zamówień / Duchów
             ignore_statuses = ['delivered', 'dostarczona', 'odebrana', 'doręczona']
             if any(k in str(new_status).lower() for k in ignore_statuses):
-                logging.warning(f"👻 IGNORUJĘ DUCHA: {email_val}, status '{new_status}'")
+                logging.warning(f"👻 Ignoruję status końcowy dla nieistniejącego zamówienia: {email_val}")
                 return
 
-            if email_val:
-                last = self.deleted_users_cache.get(email_val, 0)
-                if time.time() - last < 60:
-                    logging.warning(f"🛑 ZABLOKOWANO spam dla {email_val}")
-                    return
+            if email_val and (time.time() - self.deleted_users_cache.get(email_val, 0) < 60):
+                logging.warning(f"🛑 Blokada antyspamowa dla {email_val}.")
+                return
 
-            logging.info("🆕 Tworzę nowy wiersz.")
+            logging.info(f"🆕 Nie znaleziono wiersza. Tworzę nowy wpis.")
             self.append_order(order_data)
             if telegram_notifier:
                 telegram_notifier.send_new_package_alert(order_data)

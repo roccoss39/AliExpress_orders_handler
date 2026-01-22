@@ -127,73 +127,51 @@ class EmailHandler:
     
     def remove_user_mapping(self, user_key, package_number=None, order_number=None):
         """
-        Wersja z AGRESYWNYM DEBUGOWANIEM.
+        Usuwa powiązania zamówień/paczek. Jeśli brak numerów - usuwa cały rekord.
         """
-        # 1. Normalizacja klucza
-        raw_key = str(user_key)
-        clean_key = raw_key.lower().strip()
-        
-        logging.info(f"🕵️‍♂️ DEBUG: remove_user_mapping wywołane dla: '{raw_key}' (Clean: '{clean_key}')")
-        logging.info(f"🕵️‍♂️ DEBUG: Dostępne klucze w pamięci: {list(self.user_mappings.keys())}")
+        if not user_key:
+            return False
 
+        clean_key = str(user_key).lower().strip()
+        
         if clean_key not in self.user_mappings:
-            logging.warning(f"⚠️ DEBUG: Klucza '{clean_key}' BRAK w user_mappings! Nie mam co usuwać.")
             return False
 
         user_data = self.user_mappings[clean_key]
         changed = False
         
-        # --- OPCJA NUKLEARNA (Brak numerów = usuń wszystko) ---
+        # Sprawdzamy czy podano konkretne dane (paczka/zamówienie)
         has_specific_data = (package_number and str(package_number).strip()) or \
                             (order_number and str(order_number).strip())
 
+        # Tryb PEŁNY (Nuklearny) - używany przy archiwizacji
         if not has_specific_data:
-            logging.info(f"☢️ DEBUG: Opcja Nuklearna dla '{clean_key}'. Usuwam wpis z pamięci.")
             del self.user_mappings[clean_key]
-            
-            # NATYCHMIASTOWY ZAPIS
-            try:
-                self._save_mappings()
-                logging.info(f"✅ DEBUG: Plik JSON nadpisany po usunięciu '{clean_key}'.")
-                
-                # Weryfikacja
-                if clean_key not in self.user_mappings:
-                    logging.info(f"✅ DEBUG: Weryfikacja OK - klucza już nie ma w pamięci.")
-                else:
-                    logging.error(f"❌ DEBUG: CRITICAL - Klucz nadal istnieje mimo delete?!")
-                    
-                return True
-            except Exception as e:
-                logging.error(f"❌ DEBUG: Błąd zapisu JSON: {e}")
-                return False
+            self._save_mappings()
+            logging.info(f"❌ Użytkownik {clean_key} usunięty z monitoringu JSON.")
+            return True
 
-        # --- OPCJA CHIRURGICZNA ---
-        logging.info(f"🔪 DEBUG: Tryb chirurgiczny (Paczka: {package_number}, Zam: {order_number})")
-        
-        if package_number:
-            if "package_numbers" in user_data and package_number in user_data["package_numbers"]:
+        # Tryb CHIRURGICZNY (usuwanie konkretnej paczki)
+        if package_number and "package_numbers" in user_data:
+            if package_number in user_data["package_numbers"]:
                 user_data["package_numbers"].remove(package_number)
                 changed = True
 
-        if order_number:
+        if order_number and "order_numbers" in user_data:
             order_str = str(order_number)
-            if "order_numbers" in user_data and order_str in user_data["order_numbers"]:
+            if order_str in user_data["order_numbers"]:
                 user_data["order_numbers"].remove(order_str)
                 changed = True
 
-        # Czy puste?
-        pkgs = user_data.get("package_numbers", [])
-        ords = user_data.get("order_numbers", [])
-        
-        if not pkgs and not ords:
-            logging.info(f"🗑️ DEBUG: User '{clean_key}' jest pusty po czyszczeniu. Usuwam całkowicie.")
+        # Jeśli po usunięciu paczki user jest pusty - usuń go całkowicie
+        if not user_data.get("package_numbers", []) and not user_data.get("order_numbers", []):
             del self.user_mappings[clean_key]
+            logging.info(f"❌ Konto {clean_key} puste - usuwam całkowicie.")
             self._save_mappings()
             return True 
 
         if changed:
             self._save_mappings()
-            logging.info(f"💾 DEBUG: Zapisano zmiany częściowe dla '{clean_key}'.")
             
         return False
 

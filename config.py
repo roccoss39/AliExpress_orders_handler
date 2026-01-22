@@ -25,7 +25,7 @@ CHECK_ONLY_UNSEEN = True
 # Czy przetwarzać również przeczytane maile? Tryb dla fun reprocess
 # True = Pobiera wszystko z ostatnich dni (UWAGA: zużywa więcej tokenów AI)
 # False = Pobiera tylko nowe, nieprzeczytane (Domyślnie)
-PROCESS_READ_EMAILS = True # Huge API calls
+PROCESS_READ_EMAILS = False # Huge API calls
 
 # Czy ignorować datę ostatniego sprawdzenia?
 # False = (Domyślnie) Bot pomija maile starsze niż te zapisane w historii. BEZPIECZNE.
@@ -96,7 +96,7 @@ EMAIL_CHECK_SETTINGS = {
 }
 
 # Czy wysyłać powiadomienia mailowe o odbiorze? (True = Tak, False = Nie)
-SEND_EMAIL_NOTIFICATIONS = False
+SEND_EMAIL_NOTIFICATIONS = True
 
 # --- TELEGRAM CONFIG ---
 ENABLE_TELEGRAM = True
