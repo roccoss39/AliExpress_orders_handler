@@ -1,25 +1,26 @@
+sudo nano /etc/systemd/system/ali-tracker.service
+Wklej konfigurację (dostosuj ścieżki!):
+
+Ini, TOML
+
 [Unit]
-Description=AliExpress Order Tracker
+Description=AliExpress Order Tracker Bot
 After=network.target
 
 [Service]
-Type=simple
-User=dawid
-Group=dawid
-WorkingDirectory=/home/dawid/python/aliexpress_orders
-ExecStart=/usr/bin/python3 /home/dawid/python/aliexpress_orders/main.py
+User=twoja_nazwa_uzytkownika
+WorkingDirectory=/home/twoja_nazwa/aliexpress-tracker
+ExecStart=/usr/bin/python3 main.py
+# WAŻNE: Restartuje bota automatycznie po 10 sek w razie błędu/zamknięcia
 Restart=always
-RestartSec=30
-StandardOutput=journal
-StandardError=journal
-
-# Środowisko
-Environment=PYTHONPATH=/home/dawid/python/aliexpress_orders
-Environment=PYTHONUNBUFFERED=1
-
-# Limity zasobów
-MemoryMax=1G
-CPUQuota=50%
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
+Załaduj i uruchom:
+
+Bash
+
+sudo systemctl daemon-reload
+sudo systemctl enable ali-tracker
+sudo systemctl start ali-tracker

@@ -177,46 +177,44 @@ class EmailHandler:
 
     def fetch_new_emails(self, email_configs_override=None):
         """
-        Pobieranie e-maili z ostatnich X dni.
-        Obsługuje logikę mieszaną: PROCESS_READ_EMAILS oraz CHECK_ONLY_UNSEEN.
+        Pobiera wiadomości e-mail z kont skonfigurowanych w config.py.
+        Uproszczona logika: CHECK_ONLY_UNSEEN decyduje o filtrze (Nowe vs Wszystkie).
         """
         all_emails = []
         
+        # Ustawienia z configu (z bezpiecznymi fallbackami)
         configs = email_configs_override if email_configs_override is not None else config.ALL_EMAIL_CONFIGS
+        check_settings = getattr(config, 'EMAIL_CHECK_SETTINGS', {})
         
-        days_back = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('days_back', 14)
-        max_emails = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('max_emails_per_account', 100)
-        mark_as_read = getattr(config, 'EMAIL_CHECK_SETTINGS', {}).get('mark_as_read', True)
+        days_back = check_settings.get('days_back', 14)
+        max_emails = check_settings.get('max_emails_per_account', 100)
+        mark_as_read = check_settings.get('mark_as_read', True)
         
-        # LOGIKA FLAG
-        process_read_forced = getattr(config, 'PROCESS_READ_EMAILS', False)
-        check_only_unseen_cfg = getattr(config, 'CHECK_ONLY_UNSEEN', True)
+        # JEDNA ZMIENNA DECYDUJĄCA (Uproszczenie PROCESS_READ_EMAILS + CHECK_ONLY_UNSEEN)
+        # Jeśli CHECK_ONLY_UNSEEN = True -> szukamy tylko (UNSEEN)
+        # Jeśli CHECK_ONLY_UNSEEN = False -> szukamy wszystkich (nawet przeczytanych)
+        scan_only_new = getattr(config, 'CHECK_ONLY_UNSEEN', True)
         
-        search_only_unseen = (not process_read_forced) and check_only_unseen_cfg
-        
-        if process_read_forced:
-            logging.warning("⚠️ TRYB PROCESS_READ_EMAILS: Pobieranie WSZYSTKICH wiadomości (wymuszenie)!")
-        elif check_only_unseen_cfg:
-            logging.info("🕵️ Tryb skanowania: Tylko NIEPRZECZYTANE (szybki)")
-        else:
-            logging.info("🕵️ Tryb skanowania: WSZYSTKIE (również otwarte) - to może potrwać dłużej")
-        
+        # Obliczanie daty granicznej (IMAP wymaga formatu: DD-Mon-YYYY)
         cutoff_date = datetime.now() - timedelta(days=days_back)
         date_string = cutoff_date.strftime('%d-%b-%Y')
         
-        logging.info(f"📅 Sprawdzanie emaili od {date_string} ({days_back} dni wstecz)")
-        
+        if scan_only_new:
+            logging.info(f"🕵️ Tryb skanowania: Tylko NOWE (nieprzeczytane) od {date_string}")
+        else:
+            logging.warning(f"⚠️ Tryb skanowania: WSZYSTKIE (również przeczytane) od {date_string}")
+
         for email_config in configs:
-            source = email_config.get('source', 'gmail')
+            source = email_config.get('source', 'unknown')
             email_addr = email_config.get('email')
             
             if not email_addr or not email_config.get('password'):
-                logging.warning(f"Pomijanie {source}: brak kompletnej konfiguracji")
+                logging.warning(f"Pomijanie {source}: brak kompletnych danych logowania")
                 continue
             
-            logging.info(f"🔍 Sprawdzanie emaili {source}: {email_addr}")
-            
+            logging.info(f"🔍 Łączenie z {source}: {email_addr}")
             client = self.connect_to_email_account(email_config)
+            
             if not client:
                 continue
             
@@ -225,116 +223,79 @@ class EmailHandler:
             try:
                 client.select("INBOX")
                 
-                criteria_parts = [f'(SINCE "{date_string}")']
-                if search_only_unseen:
-                    criteria_parts.append('(UNSEEN)')
+                # Budowanie kryteriów wyszukiwania
+                criteria = [f'SINCE "{date_string}"']
+                if scan_only_new:
+                    criteria.append('UNSEEN')
                 
-                search_criteria = " ".join(criteria_parts)
-                if len(criteria_parts) > 1:
-                    search_criteria = f"({search_criteria})"
+                search_criteria = f"({' '.join(criteria)})" if len(criteria) > 1 else criteria[0]
                 
-                logging.info(f"📅 {source} Criteria: {search_criteria}")
-
-                # --- Obsługa specyficzna dla O2 ---
-                if source.lower() == 'o2':
-                    status, messages = client.search(None, search_criteria)
-                    
-                    if status == "OK" and messages[0]:
-                        all_list = messages[0].split()
-                        total_found = len(all_list)
-                        logging.info(f"📧 O2: Znaleziono {total_found} emaili")
-                        
-                        if total_found > 50:
-                            messages_to_process = all_list[-50:]
-                            logging.info(f"📧 O2: Ograniczenie do 50 najnowszych")
-                        else:
-                            messages_to_process = all_list
-                        
-                        messages = [b' '.join(messages_to_process)]
-                        status = "OK"
-                    else:
-                        messages = [b'']
-                        status = "OK"
-                else:
-                    status, messages = client.search(None, search_criteria)
+                status, messages = client.search(None, search_criteria)
                 
                 if status == "OK" and messages[0]:
-                    all_msg_list = messages[0].split()
+                    msg_list = messages[0].split()
+                    total_found = len(msg_list)
                     
-                    if len(all_msg_list) > max_emails:
-                        messages_to_process = all_msg_list[-max_emails:]
-                        logging.info(f"⚠️ Dodatkowe ograniczenie {source}: {len(all_msg_list)} -> {max_emails} najnowszych")
+                    # Specyficzny limit dla O2 (częste timeouty przy dużej ilości)
+                    actual_limit = 50 if source.lower() == 'o2' else max_emails
+                    
+                    if total_found > actual_limit:
+                        logging.info(f"📧 {source}: Znaleziono {total_found}. Ograniczam do {actual_limit} najnowszych.")
+                        msg_list = msg_list[-actual_limit:]
                     else:
-                        messages_to_process = all_msg_list
+                        logging.info(f"📧 {source}: Znaleziono {total_found} wiadomości.")
+
+                    # Sortowanie: najpierw najnowsze (wyższe ID w IMAP)
+                    msg_list.sort(key=lambda x: int(x.decode()), reverse=True)
                     
-                    logging.info(f"📧 Przetwarzanie {len(messages_to_process)} emaili z {source}")
-                    
-                    messages_to_process.sort(key=lambda x: int(x.decode()), reverse=True)
-                    
-                    for num in messages_to_process:
-                        status, msg_data = client.fetch(num, "(RFC822)")
-                        if status == "OK":
-                            raw_email = msg_data[0][1]
-                            try:
-                                email_message = email.message_from_bytes(raw_email)
-                            except:
-                                try:
-                                    decoded_content = raw_email.decode('utf-8', errors='ignore')
-                                    email_message = email.message_from_string(decoded_content)
-                                except:
-                                    continue
-                            
-                            email_date = self.extract_email_date(email_message)
+                    for num in msg_list:
+                        res, msg_data = client.fetch(num, "(RFC822)")
+                        if res != "OK": continue
+                        
+                        raw_email = msg_data[0][1]
+                        email_message = email.message_from_bytes(raw_email)
+                        
+                        # Pobieranie daty maila do weryfikacji
+                        email_date_str = self.extract_email_date(email_message)
+                        subject = self.decode_email_subject(email_message.get('Subject', 'Brak tematu'))
 
-                            try:
-                                raw_subject = email_message.get('Subject', 'Brak tematu')
-                                email_subject = self.decode_email_subject(raw_subject)
-                            except:
-                                email_subject = "Brak tematu"
+                        if email_date_str:
+                            email_dt = datetime.strptime(email_date_str, '%Y-%m-%d %H:%M:%S')
+                            if email_dt < cutoff_date:
+                                logging.info(f"⏭️ Pomijam (starszy niż zakres): {subject}")
+                                # Oznaczamy jako przeczytane, żeby nie wracał w następnej pętli
+                                if scan_only_new: emails_to_mark_read.append(num)
+                                continue
 
-                            logging.info(f"📧 Email ID {num.decode()}: {email_date} | {email_subject}")
-
-                            if email_date:
-                                email_dt = datetime.strptime(email_date, '%Y-%m-%d %H:%M:%S')
-                                if email_dt < cutoff_date:
-                                    logging.info(f"⏭️ Email z {email_date} starszy niż {days_back} dni - pomijam")
-                                    if search_only_unseen:
-                                        emails_to_mark_read.append(num)
-                                    continue
-
-                            all_emails.append((source, email_message))
-                            
-                            if search_only_unseen:
-                                emails_to_mark_read.append(num)
-                            elif process_read_forced and mark_as_read:
-                                emails_to_mark_read.append(num)
+                        logging.info(f"✅ Pobrano: {subject}")
+                        all_emails.append((source, email_message))
+                        
+                        # Dodaj do listy do oznaczenia jako przeczytane
+                        if mark_as_read:
+                            emails_to_mark_read.append(num)
                 else:
-                    logging.info(f"📭 Brak emaili spełniających kryteria w {source}")
+                    logging.info(f"📭 Brak nowych wiadomości w {source}")
                     
             except Exception as e:
-                logging.warning(f"⚠️ Błąd wyszukiwania dla {source}: {e}")
-                emails_to_mark_read = []
+                logging.error(f"❌ Błąd podczas pracy z {source} ({email_addr}): {e}")
                     
             finally:
-                if mark_as_read and emails_to_mark_read:
+                # Oznaczanie jako przeczytane (Bulk operation)
+                if emails_to_mark_read:
                     try:
                         logging.info(f"📖 Oznaczanie {len(emails_to_mark_read)} emaili jako przeczytane w {source}")
                         for num in emails_to_mark_read:
-                            try:
-                                client.store(num, '+FLAGS', '\\Seen')
-                            except:
-                                pass
+                            client.store(num, '+FLAGS', '\\Seen')
                         client.expunge()
-                    except Exception as e:
-                        logging.error(f"❌ Błąd oznaczania emaili: {e}")
+                    except:
+                        pass
                 
                 try:
-                    client.close()
                     client.logout()
                 except:
                     pass
         
-        logging.info(f"📧 Łącznie pobrano {len(all_emails)} emaili")
+        logging.info(f"📊 FINAŁ: Pobrano łącznie {len(all_emails)} wiadomości do analizy AI.")
         return all_emails
     
     def get_email_body(self, email_message):
