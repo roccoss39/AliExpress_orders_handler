@@ -593,40 +593,93 @@ class SheetsHandler:
             traceback.print_exc()
 
     def update_row_cells(self, row_index, order_data):
-        """Aktualizuje wybrane komórki w istniejącym wierszu i nadaje KOLOR."""
+        """
+        Aktualizuje wiersz o BOGATE dane (adresy, kody, telefony) i nadaje KOLOR.
+        Nadpisuje komórkę tylko wtedy, gdy w nowych danych faktycznie coś jest (nie kasuje starych danych).
+        """
+        import time
         try:
             cells_to_update = []
             
-            def add_cell(col_idx, key):
-                val = order_data.get(key)
-                if val is not None: 
+            # --- HELPERY ---
+            def get_val(key):
+                """Pobiera wartość jako string, zamienia None na ''"""
+                return str(order_data.get(key, '') or '')
+
+            def update_if_exists(col_idx, value):
+                """Dodaje komórkę do aktualizacji TYLKO jeśli nowa wartość nie jest pusta."""
+                if value and str(value).strip(): 
                     cells_to_update.append(
-                        gspread.Cell(row_index, col_idx, str(val))
+                        gspread.Cell(row_index, col_idx, str(value))
                     )
 
-            # Mapowanie kolumn
-            add_cell(Col.STATUS, 'status')
-            add_cell(Col.MSG_DATE, 'email_date')
-            add_cell(Col.PICKUP_CODE, 'pickup_code')
-            add_cell(Col.PKG_NUM, 'package_number')
-            add_cell(Col.LINK, 'tracking_link')
-            add_cell(Col.QR, 'qr_link')
-            add_cell(Col.INFO, 'carrier')
+            # --- 1. PRZYGOTOWANIE DANYCH (Logika priorytetów) ---
+            
+            # Adres: delivery_address (z zamówienia) lub pickup_location (z odbioru)
+            address = get_val('delivery_address') or get_val('pickup_location')
+            
+            # Telefon: courier_phone (ważniejszy) lub phone_number
+            phone = get_val('courier_phone') or get_val('phone_number')
+            
+            # Daty i godziny
+            deadline = get_val('pickup_deadline')
+            hours = get_val('available_hours')
+            est_delivery = get_val('estimated_delivery') or get_val('expected_delivery_date')
+            
+            # Linki
+            tracking_link = get_val('tracking_link') or get_val('item_link')
+            qr_link = get_val('qr_code') or get_val('qr_link')
+            
+            # Info + Carrier (Budowanie ładnego stringa)
+            carrier = order_data.get('carrier', 'Unknown')
+            info = order_data.get('info', '')
+            courier_name = get_val('courier_name')
+            
+            # Budujemy treść Info: "InPost | Kurier: Marek | Info z maila"
+            info_parts = [carrier]
+            if courier_name:
+                info_parts.append(f"Kurier: {courier_name}")
+            if info and info != carrier:
+                info_parts.append(info)
+            
+            carrier_info_str = " | ".join(info_parts)
 
-            # 1. Aktualizacja danych
+            # --- 2. MAPOWANIE KOLUMN DO ZAPISU ---
+            
+            # Te pola aktualizujemy prawie zawsze (Status i Data Maila)
+            update_if_exists(Col.STATUS, get_val('status'))
+            update_if_exists(Col.MSG_DATE, get_val('email_date'))
+            
+            # Kluczowe dane paczkowe
+            update_if_exists(Col.PICKUP_CODE, get_val('pickup_code'))
+            update_if_exists(Col.PKG_NUM, get_val('package_number'))
+            
+            # Bogate dane (Tylko jeśli przyszły w nowym mailu!)
+            update_if_exists(Col.PRODUCT, get_val('product_name'))
+            update_if_exists(Col.ADDRESS, address)
+            update_if_exists(Col.PHONE, phone)
+            update_if_exists(Col.DEADLINE, deadline)
+            update_if_exists(Col.HOURS, hours)
+            update_if_exists(Col.EST_DELIVERY, est_delivery)
+            
+            # Linki i Info
+            update_if_exists(Col.LINK, tracking_link)
+            update_if_exists(Col.QR, qr_link)
+            update_if_exists(Col.INFO, carrier_info_str)
+
+            # --- 3. FIZYCZNA AKTUALIZACJA DANYCH ---
             if cells_to_update:
-                logging.info(f"🐞 [DEBUG] Czekam 1s przed zapisem wiersza {row_index}...") ###TO DETLEte!!!!!
-                time.sleep(1) ###TO DETLEte!!!!!
+                logging.info(f"🐞 [DEBUG] Czekam 1s przed zapisem wiersza {row_index}...") 
+                time.sleep(1) 
                 self.worksheet.update_cells(cells_to_update)
                 logging.info(f"✅ Zaktualizowano {len(cells_to_update)} pól w wierszu {row_index}")
 
-            # 2. 🎨 AKTUALIZACJA KOLORU (Zależna od kuriera!)
+            # --- 4. 🎨 AKTUALIZACJA KOLORU (Zależna od kuriera!) ---
             new_status = order_data.get('status', '')
-            carrier_name = order_data.get('carrier', 'Unknown') # Pobieramy nazwę kuriera
             
             if new_status:
-                # ✅ TU JEST ZMIANA: Przekazujemy carrier_name
-                color = self._get_status_color(new_status, carrier_name)
+                # Używamy helpera do wyboru koloru
+                color = self._get_status_color(new_status, carrier)
                 
                 range_name = f"A{row_index}:P{row_index}"
                 
@@ -634,7 +687,7 @@ class SheetsHandler:
                     "backgroundColor": color,
                     "textFormat": {"foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0}}
                 })
-                logging.info(f"🎨 Zmieniono kolor wiersza {row_index} (Status: {new_status}, Carrier: {carrier_name})")
+                logging.info(f"🎨 Zmieniono kolor wiersza {row_index} (Status: {new_status}, Carrier: {carrier})")
 
         except Exception as e:
             logging.error(f"❌ Błąd w update_row_cells: {e}")

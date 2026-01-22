@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 import logging
 import re
-from config import COLORS
 
 # ==========================================
 # 🗺️ MAPA KOLUMN (Konfiguracja Arkusza)

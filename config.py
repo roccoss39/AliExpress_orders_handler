@@ -9,8 +9,6 @@ load_dotenv(override=True)
 # 'ACCOUNTS' - sprawdza tylko maile wpisane w zakładce "Accounts" w Google Sheets
 EMAIL_TRACKING_MODE = 'ACCOUNTS'
 
-
-
 # Kierunek przetwarzania maili
 # True  = (Domyślnie) Od NAJNOWSZYCH do najstarszych. 
 #         Szybkie. Bierze tylko ostatni status paczki i ignoruje starsze maile w tym samym cyklu.
@@ -22,7 +20,7 @@ PROCESS_FROM_NEWEST = True
 # Normal work : True
 # True  = Sprawdza tylko te z "kropką" (UNSEEN). Szybkie, oszczędne.
 # False = Sprawdza WSZYSTKIE maile z zakresu dat (nawet te otwarte). Wolniejsze, ale pewniejsze.
-CHECK_ONLY_UNSEEN = False
+CHECK_ONLY_UNSEEN = True
 
 # Czy przetwarzać również przeczytane maile? Tryb dla fun reprocess
 # True = Pobiera wszystko z ostatnich dni (UWAGA: zużywa więcej tokenów AI)
@@ -63,26 +61,8 @@ TEST_MODE = False  # Ustawiamy na False żeby działał main_loop
 # Szybkie sprawdzanie (co 10 sekund)
 QUICK_CHECK = False  # Nowa opcja dla szybkiego sprawdzania
 
-# Kolory statusów (wartości RGB)
-COLORS = {
-    "delivered": {"red": 0.7, "green": 0.9, "blue": 0.7},  # zielony
-    "canceled": {"red": 0.9, "green": 0.7, "blue": 0.7},   # czerwony
-    "pickup": {"red": 0.7, "green": 0.7, "blue": 0.9},  # Jasny niebieski
-    "available_email": {"red": 0.8, "green": 0.7, "blue": 0.9},   # fioletowy
-}
-
 # Klucz API OpenAI
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-
-# ✅ DODAJ KONFIGURACJĘ O2
-# O2_EMAILS = [
-#     {
-#         'email': "podziewski39@o2.pl",
-#         'password': os.getenv('O2_PASSWORD_1'),
-#         'source': "o2"
-#     },
-#     # Dodaj więcej kont O2 w razie potrzeby
-# ]
 
 # ✅ KOMPLETA LISTA WSZYSTKICH EMAILI W JEDNYM MIEJSCU
 ALL_EMAIL_CONFIGS = [
@@ -106,7 +86,7 @@ ALL_EMAIL_CONFIGS = [
 
 # ✅ KONFIGURACJA OKRESÓW SPRAWDZANIA
 EMAIL_CHECK_SETTINGS = {
-    'days_back': 60,                    # 30 dni wstecz
+    'days_back': 30,                    # 30 dni wstecz
     'fallback_limit': 50,               # Limit emaili w trybie fallback
     'max_emails_per_account': 100,      # Maksymalna liczba emaili na konto
     'o2_email_limit': 50,               # Specjalny limit dla O2

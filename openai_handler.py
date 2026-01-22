@@ -1070,7 +1070,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
               "package_number": "0000363570900W",
               "shipping_date": "24.05.2025",
               "expected_delivery_date": "28.05.2025",
-              "delivery_address": "ul. Bazarowa 10/1, 71-614 Szczecin",
+              "delivery_address": "ul. Matejki 10/1, 71-614 Szczecin",
               "email": "{recipient_email}",
               "carrier": "{carrier_name}",
               "status": "shipment_sent"
@@ -1110,7 +1110,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
               "order_number": "8041215699357896",
               "order_date": "20.05.2025",
               "product_name": "Słuchawki bezprzewodowe Xiaomi",
-              "delivery_address": "ul. Bazarowa 10/1, 71-614 Szczecin",
+              "delivery_address": "ul. Matejki 10/1, 71-614 Szczecin",
               "phone_number": "506 575 068",
               "email": "{recipient_email}",
               "item_link": "https://www.aliexpress.com/p/order/detail.html?orderId=8041215699357896",
