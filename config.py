@@ -33,7 +33,7 @@ CHECK_ONLY_UNSEEN = True
 IGNORE_LAST_EMAIL_DATE_CHECK = False
 
 # Or Regrex if False
-USE_OPENAI_API = False 
+USE_OPENAI_API = True 
 
 # Ustawienia kont e-mail
 GMAIL_EMAIL = os.getenv('GMAIL_EMAIL_1')
@@ -103,3 +103,7 @@ ENABLE_TELEGRAM = True
 TELEGRAM_BOT_TOKEN = os.getenv('_TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('_TELEGRAM_CHAT_ID')
 
+# --- LOGOWANIE ---
+LOG_TO_FILE = True        # True = zapisuje do pliku .log
+LOG_TO_CONSOLE = True      # True = wypisuje logi w terminalu
+LOG_FILE_NAME = "aliexpress_tracker.log"

@@ -25,16 +25,29 @@ import os
 from health_check import stop_health_server
     
 # ==========================================
-# 🔧 KONFIGURACJA LOGOWANIA
+# 🔧 KONFIGURACJA LOGOWANIA (Dynamiczna)
 # ==========================================
+log_handlers = []
+
+# 1. Sprawdzenie czy logować do pliku
+if getattr(config, 'LOG_TO_FILE', True):
+    log_file = getattr(config, 'LOG_FILE_NAME', "aliexpress_tracker.log")
+    log_handlers.append(logging.FileHandler(log_file, encoding='utf-8'))
+
+# 2. Sprawdzenie czy wyświetlać na ekranie (konsoli)
+if getattr(config, 'LOG_TO_CONSOLE', True):
+    log_handlers.append(logging.StreamHandler(sys.stdout))
+
+# 3. Jeśli obie opcje są wyłączone, dodajemy NullHandler, żeby program nie rzucał błędami
+if not log_handlers:
+    log_handlers.append(logging.NullHandler())
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("aliexpress_tracker.log"), # Zapis do pliku
-        logging.StreamHandler(sys.stdout)              # ✅ Zapis na ekran
-    ]
+    handlers=log_handlers
 )
+
 # Zapobiega wywalaniu błędów BrokenPipe na ekran
 logging.raiseExceptions = False 
 logging.getLogger('openai').setLevel(logging.WARNING)
