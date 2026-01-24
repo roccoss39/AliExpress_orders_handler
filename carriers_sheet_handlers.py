@@ -875,3 +875,5 @@ class PocztaPolskaCarrier(BaseCarrier):
             "transit": {"red": 0.95, "green": 0.9, "blue": 0.9},
             "closed": {"red": 1.0, "green": 0.2, "blue": 0.2}
         }
+
+    

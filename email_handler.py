@@ -11,6 +11,7 @@ import time
 from openai_handler import OpenAIHandler
 import pytz
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
 
 class EmailHandler:
     def __init__(self):
@@ -299,8 +300,13 @@ class EmailHandler:
         return all_emails
     
     def get_email_body(self, email_message):
-        """Wydobycie treści e-maila z obsługą polskich kodowań"""
-        body = ""
+        """
+        Wydobycie treści e-maila. 
+        Priorytet: text/plain -> text/html (parsowany na tekst).
+        """
+        body_text = ""
+        body_html = ""
+        
         try:
             if email_message.is_multipart():
                 for part in email_message.walk():
@@ -310,51 +316,58 @@ class EmailHandler:
                     if "attachment" in content_disposition:
                         continue
                         
-                    if content_type == "text/plain" or content_type == "text/html":
-                        try:
-                            payload = part.get_payload(decode=True)
-                            charset = part.get_content_charset()
+                    # Pobieramy payload i dekodujemy charset
+                    try:
+                        payload = part.get_payload(decode=True)
+                        charset = part.get_content_charset()
+                        
+                        decoded_part = ""
+                        if charset:
+                            try:
+                                decoded_part = payload.decode(charset, errors="replace")
+                            except (LookupError, UnicodeDecodeError):
+                                # Fallbacki dla polskich kodowań
+                                try: decoded_part = payload.decode("utf-8")
+                                except: decoded_part = payload.decode("iso-8859-2", errors="replace")
+                        else:
+                            # Brak info o kodowaniu - zgadujemy
+                            try: decoded_part = payload.decode("utf-8")
+                            except: 
+                                try: decoded_part = payload.decode("iso-8859-2")
+                                except: decoded_part = payload.decode("windows-1250", errors="replace")
+                        
+                        if content_type == "text/plain":
+                            body_text += decoded_part
+                        elif content_type == "text/html":
+                            body_html += decoded_part
                             
-                            if charset:
-                                try:
-                                    body += payload.decode(charset, errors="replace")
-                                except (LookupError, UnicodeDecodeError):
-                                    try:
-                                        body += payload.decode("utf-8")
-                                    except:
-                                        body += payload.decode("iso-8859-2", errors="replace")
-                            else:
-                                try:
-                                    body += payload.decode("utf-8")
-                                except:
-                                    try:
-                                        body += payload.decode("iso-8859-2")
-                                    except:
-                                        body += payload.decode("windows-1250", errors="replace")
-                        except Exception as e:
-                            logging.warning(f"Błąd dekodowania części maila: {e}")
+                    except Exception as e:
+                        logging.warning(f"Błąd dekodowania części maila: {e}")
             else:
+                # Nie jest multipart
                 payload = email_message.get_payload(decode=True)
                 charset = email_message.get_content_charset()
                 
-                if charset:
-                    try:
-                        body = payload.decode(charset, errors="replace")
-                    except (LookupError, UnicodeDecodeError):
-                        body = payload.decode("iso-8859-2", errors="replace")
-                else:
-                    try:
-                        body = payload.decode("utf-8")
-                    except:
-                        try:
-                            body = payload.decode("iso-8859-2")
-                        except:
-                            body = payload.decode("windows-1250", errors="replace")
-                            
+                # ... (analogiczna logika dekodowania jak wyżej) ...
+                try:
+                    if charset:
+                        body_text = payload.decode(charset, errors="replace")
+                    else:
+                        body_text = payload.decode("utf-8", errors="replace")
+                except:
+                    body_text = str(payload)
+
+            # Finał: zwracamy tekst lub przetworzony HTML
+            if body_text.strip():
+                return body_text
+            elif body_html.strip():
+                return self._html_to_text(body_html)
+            else:
+                return ""
+                
         except Exception as e:
             logging.error(f"Krytyczny błąd pobierania treści maila: {e}")
-            
-        return body
+            return ""
     
     def extract_email_date(self, email_message):
         """Wyciąga datę z nagłówka emaila"""
@@ -903,3 +916,50 @@ class EmailHandler:
                 pass
                 
         return all_emails
+    
+    def _html_to_text(self, html):
+        """Konwertuje HTML na czysty tekst (Metoda pomocnicza)"""
+        if not html:
+            return ""
+            
+        class HTMLToText(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.text = []
+                self.skip = False
+                
+            def handle_starttag(self, tag, attrs):
+                if tag in ['script', 'style', 'head']:
+                    self.skip = True
+                elif tag == 'br':
+                    self.text.append('\n')
+                elif tag in ['p', 'div', 'tr']:
+                    self.text.append('\n')
+                    
+            def handle_endtag(self, tag):
+                if tag in ['script', 'style', 'head']:
+                    self.skip = False
+                elif tag in ['p', 'div', 'tr', 'td']:
+                    self.text.append('\n')
+                    
+            def handle_data(self, data):
+                if not self.skip:
+                    text = data.strip()
+                    if text:
+                        self.text.append(text)
+        
+        parser = HTMLToText()
+        try:
+            parser.feed(html)
+            text = ' '.join(parser.text)
+            # Usuń wielokrotne spacje i puste linie
+            text = re.sub(r' +', ' ', text)
+            text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+            return text.strip()
+        except:
+            # Fallback - usuń tagi HTML regexem (jeśli parser zawiedzie)
+            text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<[^>]+>', '', html)
+            text = re.sub(r'\s+', ' ', text)
+            return text.strip()

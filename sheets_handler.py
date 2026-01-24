@@ -445,6 +445,9 @@ class SheetsHandler:
         import time
         
         try:
+            # 1. Definicja email_date na samym początku (Fix dla Pylance)
+            email_date = order_data.get("email_date") or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
             # Tworzymy pustą listę o długości odpowiadającej ostatniej kolumnie (P = 16)
             row = [''] * 16  
             
@@ -461,37 +464,43 @@ class SheetsHandler:
             # 2. Produkt
             row[Col.PRODUCT - 1] = get_val('product_name')
             
-            # 3. ✅ Adres (Teraz zapisujemy to co dało AI!)
-            # AI zwraca 'delivery_address' (dla zamówień) lub 'pickup_location' (dla odbioru)
+            # 3. Adres
             row[Col.ADDRESS - 1] = get_val('delivery_address') or get_val('pickup_location')
             
-            # 4. ✅ Telefon (Twój lub kuriera)
-            # Priorytet: Telefon kuriera -> Twój telefon -> Puste
+            # 4. Telefon
             row[Col.PHONE - 1] = get_val('courier_phone') or get_val('phone_number')
             
             # 5. Kod odbioru
             row[Col.PICKUP_CODE - 1] = get_val('pickup_code')
             
-            # 6. ✅ Deadline (Data odbioru)
+            # 6. Deadline
             row[Col.DEADLINE - 1] = get_val('pickup_deadline')
             
-            # 7. ✅ Godziny otwarcia punktu
+            # 7. Godziny
             row[Col.HOURS - 1] = get_val('available_hours')
             
             # 8. Data wiadomości
-            row[Col.MSG_DATE - 1] = get_val('email_date')
+            row[Col.MSG_DATE - 1] = email_date
             
             # 9. Status
             row[Col.STATUS - 1] = get_val('status')
             
-            # 10. Data zamówienia (Zapisujemy datę z maila lub dzisiejszą)
+            # 10. Data zamówienia
             order_date = get_val('order_date') or get_val('shipping_date')
             if not order_date:
                 order_date = datetime.now().strftime('%Y-%m-%d %H:%M')
             row[Col.ORDER_DATE - 1] = order_date
             
-            # 11. ✅ Przewidywana dostawa
-            row[Col.EST_DELIVERY - 1] = get_val('estimated_delivery') or get_val('expected_delivery_date')
+            # 11. ✅ Przewidywana dostawa (Z NAPRAWIONĄ LOGIKĄ)
+            ai_est_delivery = get_val('estimated_delivery') or get_val('expected_delivery_date')
+            
+            if ai_est_delivery:
+                row[Col.EST_DELIVERY - 1] = ai_est_delivery
+            else:
+                # Jeśli brak w mailu, obliczamy sami
+                carrier_name = order_data.get('carrier', 'Unknown')
+                calculated_date = self.calculate_fallback_delivery_date(carrier_name, email_date)
+                row[Col.EST_DELIVERY - 1] = calculated_date
             
             # 12. QR Link
             row[Col.QR - 1] = get_val('qr_code') or get_val('qr_link')
@@ -499,11 +508,9 @@ class SheetsHandler:
             # 13. Numer Zamówienia
             row[Col.ORDER_NUM - 1] = get_val('order_number')
             
-            # 14. Info / Przewoźnik (Bogatsze info)
+            # 14. Info / Przewoźnik
             carrier = order_data.get('carrier', 'AliExpress')
             info = order_data.get('info', '')
-            
-            # Jeśli AI zwróciło imię kuriera, dodaj je do info
             courier_name = get_val('courier_name')
             if courier_name:
                 info = f"{info} (Kurier: {courier_name})".strip()
@@ -520,17 +527,12 @@ class SheetsHandler:
             self.worksheet.append_row(row)
             logging.info(f"🆕 Dodano BOGATY wiersz dla zamówienia {get_val('order_number')}")
             
-            # =================================================================
-            # 🎨 KOLOROWANIE
-            # =================================================================
+            # Kolorowanie
             try:
                 time.sleep(1) 
                 new_row_index = self.find_order_row(order_data)
-                
                 if new_row_index:
-                    logging.info(f"🎨 Nakładam kolory na nowy wiersz {new_row_index}...")
                     self.update_row_cells(new_row_index, order_data)
-                    
             except Exception as e:
                 logging.error(f"⚠️ Nie udało się pokolorować nowego wiersza: {e}")
             
@@ -616,8 +618,8 @@ class SheetsHandler:
 
             # --- 3. FIZYCZNA AKTUALIZACJA DANYCH ---
             if cells_to_update:
-                logging.info(f"🐞 [DEBUG] Czekam 1s przed zapisem wiersza {row_index}...") 
-                time.sleep(1) 
+                logging.info(f"🐞 [DEBUG] Czekam 5s przed zapisem wiersza {row_index}...") 
+                time.sleep(5) 
                 self.worksheet.update_cells(cells_to_update)
                 logging.info(f"✅ Zaktualizowano {len(cells_to_update)} pól w wierszu {row_index}")
 
@@ -716,3 +718,31 @@ class SheetsHandler:
                 return color
                 
         return default_color
+    
+    def calculate_fallback_delivery_date(self, carrier_name, start_date_str):
+        """
+        Oblicza szacowaną datę dostawy, jeśli nie ma jej w mailu.
+        Zależy od przewoźnika.
+        """
+        if not start_date_str:
+            return ""
+            
+        try:
+            # Parsowanie daty (bierzemy tylko YYYY-MM-DD)
+            start_date = datetime.strptime(start_date_str[:10], '%Y-%m-%d')
+            carrier = str(carrier_name).lower()
+            days_to_add = 7 # Domyślnie
+            
+            if "aliexpress" in carrier:
+                days_to_add = 10 # Chiny - długo
+            elif "inpost" in carrier or "paczkomat" in carrier:
+                days_to_add = 2   # Szybko
+            elif "dhl" in carrier or "dpd" in carrier or "gls" in carrier:
+                days_to_add = 2   # Kurierzy
+            elif "poczta" in carrier or "pocztex" in carrier:
+                days_to_add = 4   # Poczta
+                
+            return (start_date + timedelta(days=days_to_add)).strftime('%Y-%m-%d')
+        except Exception as e:
+            logging.warning(f"Błąd obliczania daty dostawy: {e}")
+            return ""
