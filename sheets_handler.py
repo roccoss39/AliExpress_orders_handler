@@ -427,7 +427,7 @@ class SheetsHandler:
         status = str(status_text).lower()
         
         if "unknown" in status or "nieznan" in status: return 0
-        if "confirmed" in status or "zatwierdzon" in status or "potwierdzon" in status: return 1
+        if "confirmed" in status or "zatwierdzon" in status or "potwierdzon" in status or "created_by_inpost" in status:  return 1
         if "transit" in status or "transporcie" in status or "drodze" in status: return 2
         if "shipment_sent" in status or "nadan" in status: return 3
         if "pickup" in status or "odbioru" in status or "awizo" in status or "placówce" in status: return 4
@@ -618,8 +618,8 @@ class SheetsHandler:
 
             # --- 3. FIZYCZNA AKTUALIZACJA DANYCH ---
             if cells_to_update:
-                logging.info(f"🐞 [DEBUG] Czekam 5s przed zapisem wiersza {row_index}...") 
-                time.sleep(5) 
+                logging.info(f"🐞 [DEBUG] Czekam 1s przed zapisem wiersza {row_index}...") 
+                time.sleep(1) 
                 self.worksheet.update_cells(cells_to_update)
                 logging.info(f"✅ Zaktualizowano {len(cells_to_update)} pól w wierszu {row_index}")
 
@@ -667,6 +667,7 @@ class SheetsHandler:
             },
             # --- INPOST (Odcienie niebieskiego) ---
             "inpost": {
+                "created_by_inpost": {"red": 0.85, "green": 0.85, "blue": 0.95},
                 "shipment_sent": {"red": 0.8, "green": 0.9, "blue": 1.0},
                 "pickup": {"red": 0.5, "green": 0.5, "blue": 1.0},      # Mocny niebieski
                 "odbioru": {"red": 0.5, "green": 0.5, "blue": 1.0},

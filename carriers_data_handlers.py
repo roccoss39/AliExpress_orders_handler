@@ -318,6 +318,8 @@ class InPostDataHandler(BaseDataHandler):
             status = "shipment_sent"
         elif "kurier odebrał" in subject_lower or "w trasie" in subject_lower or "w drodze" in subject_lower:
             status = "transit"
+        elif "potwierdzenie utworzenia paczki" in subject_lower:
+            status = "created_by_inpost"
         else:
             # Domyślnie, jeśli to InPost, ale nie wiemy co (bezpieczniej dać shipment_sent niż pickup)
             if "utworzenia" in subject_lower:

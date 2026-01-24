@@ -1033,6 +1033,9 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             5. TRANSIT - paczka po potwierdzeniu wyruszyla do Polski (mail od Aliexpress)
             - Ustaw status przesyłki: "transit" (OBOWIĄZKOWO) 
 
+            6. Utworznie paczki przez inpost (nie nadanie!)
+            - Ustaw status przesyłki: "created_by_inpost" (OBOWIĄZKOWO) 
+
             Nagłówek To: {to_header}
             Temat maila: {subject}
 
@@ -1122,6 +1125,11 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             5. TRANSIT:
             {{
             "status": "transit"
+            }}
+
+            6. Created_by_inpost
+            {{
+            "status": "created_by_inpost"
             }}
             """
 

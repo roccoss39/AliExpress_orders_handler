@@ -249,6 +249,7 @@ class InPostCarrier(BaseCarrier):
         super().__init__(sheets_handler)
         self.name = "InPost"
         self.colors = {
+            "created_by_inpost": {"red": 0.85, "green": 0.85, "blue": 0.95},
             "shipment_sent": {"red": 0.8, "green": 0.9, "blue": 1.0},
             "pickup": {"red": 0.5, "green": 0.5, "blue": 1.0},
             "delivered": {"red": 0.5, "green": 0.9, "blue": 0.8}
