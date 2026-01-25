@@ -524,7 +524,7 @@ class SheetsHandler:
             row[Col.LINK - 1] = get_val('tracking_link') or get_val('item_link')
 
             # --- ZAPIS DO ARKUSZA ---
-            self.worksheet.append_row(row)
+            self.worksheet.append_row(row, table_range="A1")
             logging.info(f"🆕 Dodano BOGATY wiersz dla zamówienia {get_val('order_number')}")
             
             # Kolorowanie

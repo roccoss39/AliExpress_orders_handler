@@ -319,6 +319,10 @@ class EmailHandler:
                     # Pobieramy payload i dekodujemy charset
                     try:
                         payload = part.get_payload(decode=True)
+
+                        if payload is None:
+                            continue
+                        
                         charset = part.get_content_charset()
                         
                         decoded_part = ""

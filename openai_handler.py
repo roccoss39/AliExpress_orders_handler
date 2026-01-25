@@ -1619,6 +1619,8 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                     result["status"] = "pickup"
                 elif "została dostarczona" in body_lower or "odebrana" in body_lower:
                     result["status"] = "delivered"
+                elif "potwierdzenie utworzenia paczki" in body_lower:
+                    result["status"] = "created_by_inpost"
 
             # =================================================================
             # OBSŁUGA DPD
