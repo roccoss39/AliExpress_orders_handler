@@ -303,7 +303,7 @@ class SheetsHandler:
                 order_data.get("item_link", "")             # P
             ]
             
-            self.worksheet.append_row(row_data)
+            self.worksheet.append_row(row_data, table_range="A1")
             new_row_idx = len(self.worksheet.col_values(1)) # Szybsze sprawdzenie długości
             
             # Kolory
@@ -432,9 +432,7 @@ class SheetsHandler:
         if "shipment_sent" in status or "nadan" in status: return 3
         if "pickup" in status or "odbioru" in status or "awizo" in status or "placówce" in status: return 4
         if "delivered" in status or "dostarczon" in status or "odebran" in status: return 5
-        # Closed i Canceled mają najwyższy priorytet, bo kończą cykl definitywnie
-        if "closed" in status or "zamknięte" in status: return 6
-        if "canceled" in status or "anulowan" in status or "zwrot" in status: return 6
+        if "closed" in status or "zamknięte" in status or "canceled" in status or "anulowan" in status or "zwrot" in status: return 1
         return 0
     
     def append_order(self, order_data):
@@ -524,7 +522,7 @@ class SheetsHandler:
             row[Col.LINK - 1] = get_val('tracking_link') or get_val('item_link')
 
             # --- ZAPIS DO ARKUSZA ---
-            self.worksheet.append_row(row, table_range="A1")
+            self.worksheet.append_row(row, table_range = "A1")
             logging.info(f"🆕 Dodano BOGATY wiersz dla zamówienia {get_val('order_number')}")
             
             # Kolorowanie

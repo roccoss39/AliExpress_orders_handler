@@ -311,15 +311,14 @@ class InPostDataHandler(BaseDataHandler):
         if "dostarczona" in subject_lower or "odebrana" in subject_lower:
             status = "delivered"
         elif "czeka na odbiór" in subject_lower or "w paczkomacie" in subject_lower or "kod odbioru" in body_lower:
-            # Tylko jeśli wyraźnie czeka w paczkomacie
             status = "pickup"
+        elif "potwierdzenie utworzenia paczki" in subject_lower:
+            status = "created_by_inpost"
         elif "utworzenia paczki" in subject_lower or "przygotowana" in subject_lower or "nadana" in subject_lower or "nadania" in subject_lower:
-            # ✅ POPRAWKA: Utworzenie to dopiero początek (shipment_sent)
             status = "shipment_sent"
         elif "kurier odebrał" in subject_lower or "w trasie" in subject_lower or "w drodze" in subject_lower:
             status = "transit"
-        elif "potwierdzenie utworzenia paczki" in subject_lower:
-            status = "created_by_inpost"
+        
         else:
             # Domyślnie, jeśli to InPost, ale nie wiemy co (bezpieczniej dać shipment_sent niż pickup)
             if "utworzenia" in subject_lower:

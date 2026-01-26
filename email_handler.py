@@ -313,6 +313,9 @@ class EmailHandler:
                     content_type = part.get_content_type()
                     content_disposition = str(part.get("Content-Disposition"))
                     
+                    if content_type.startswith("multipart/"):
+                       continue
+
                     if "attachment" in content_disposition:
                         continue
                         
@@ -322,7 +325,7 @@ class EmailHandler:
 
                         if payload is None:
                             continue
-                        
+
                         charset = part.get_content_charset()
                         
                         decoded_part = ""
@@ -739,18 +742,23 @@ class EmailHandler:
             return None
 
     def _update_user_last_email_date(self, user_key, email_date):
-        """Aktualizuje datę ostatniego emaila dla użytkownika"""
+        """Aktualizuje datę ostatniego emaila dla użytkownika - BEZ TWORZENIA ZOMBIE"""
         try:
             if not user_key or not email_date:
                 return
                 
+            # ✅ POPRAWKA: Jeśli użytkownika nie ma w bazie, NIE TWÓRZ GO.
+            # Użytkownik zostanie utworzony dopiero, gdy znajdziemy konkretny numer zamówienia/paczki.
             if user_key not in self.user_mappings:
-                self.user_mappings[user_key] = {
-                    "order_numbers": [], 
-                    "package_numbers": [],
-                    "last_email_date": None
-                }
+                # logging.debug(f"Pominięto aktualizację daty dla nieistniejącego (lub usuniętego) użytkownika: {user_key}")
+                return
             
+            # Dodatkowe zabezpieczenie: nie aktualizuj pustych kont (bez zamówień i paczek)
+            user_data = self.user_mappings[user_key]
+            if not user_data.get("order_numbers") and not user_data.get("package_numbers"):
+                 # To jest sytuacja "Zombie" - puste konto. Nie reanimuj go samą datą.
+                 return
+
             self.user_mappings[user_key]["last_email_date"] = email_date
             
             logging.info(f"Zaktualizowano datę ostatniego emaila dla {user_key}: {email_date}")

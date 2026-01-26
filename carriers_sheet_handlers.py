@@ -56,8 +56,7 @@ class BaseCarrier:
         if "shipment_sent" in status or "nadan" in status: return 3
         if "pickup" in status or "odbioru" in status or "awizo" in status or "placówce" in status: return 4
         if "delivered" in status or "dostarczon" in status or "odebran" in status: return 5
-        if "closed" in status or "zamknięte" in status: return 6
-        if "canceled" in status or "anulowan" in status or "zwrot" in status: return 6
+        if "closed" in status or "zamknięte" in status or "canceled" in status or "anulowan" in status or "zwrot" in status: return 1
         return 0
 
     def update_shipment_sent(self, row, order_data):
