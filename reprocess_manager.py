@@ -4,13 +4,17 @@ from sheets_handler import SheetsHandler
 from carriers_sheet_handlers import EmailAvailabilityManager
 
 #example use: python3 main.py --reprocess-email jan.kowalski@interia.pl --limit 10
-def run_reprocess(target_email, limit=None):
+def run_reprocess(target_email, limit=None, subject_contains: str = ""):
     """
     Wymusza ponowne pobranie maili dla konkretnego adresu.
     """
     logging.info(f"🛠️ URUCHAMIAM TRYB REPROCESS DLA: {target_email}")
     if limit:
         logging.info(f"🔢 Limit: {limit} zamówień")
+
+    subject_contains_norm = (subject_contains or "").strip().lower()
+    if subject_contains_norm:
+        logging.info(f"🔎 Filtr tematu (subject_contains): '{subject_contains_norm}'")
     
     email_handler = EmailHandler()
     sheets_handler = SheetsHandler()
@@ -41,6 +45,10 @@ def run_reprocess(target_email, limit=None):
             email_date = email_handler.extract_email_date(msg)
             raw_subject = msg.get("Subject", "")
             subject = email_handler.decode_email_subject(raw_subject)
+
+            # Opcjonalny filtr po fragmencie tematu (case-insensitive)
+            if subject_contains_norm and subject_contains_norm not in subject.lower():
+                continue
             
             # Szybki filtr po słowach kluczowych
             keywords = ["paczka", "zamówienie", "order", "delivery", "dostawa", "odbierz", "nadana", "status", "inpost", "dhl", "dpd", "gls", "poczta"]
@@ -70,8 +78,11 @@ def run_reprocess(target_email, limit=None):
                     order_data["email_date"] = email_date
                 
                 # Zapisz mapowania
+                status_lower = str(order_data.get('status', '') or '').lower()
+                is_final = any(k in status_lower for k in ['delivered', 'dostarczon', 'odebran', 'picked up', 'zwrócon', 'zwrocon', 'zamknięt', 'zamkniet'])
+
                 user_key = order_data.get("user_key")
-                if user_key:
+                if user_key and not is_final:
                     if order_data.get("order_number"):
                         email_handler._save_user_order_mapping(user_key, order_data["order_number"])
                     if order_data.get("package_number"):
@@ -89,6 +100,14 @@ def run_reprocess(target_email, limit=None):
                         sheets_handler._direct_create_row(order_data)
                 
                 processed_count += 1
+
+                # Jeśli w reprocess trafiliśmy na status końcowy, to dalsze maile historyczne
+                # mogą tylko "reanimować" mappingi i robić szum. Kończymy reprocess dla tego konta.
+                status_lower = str(order_data.get('status', '') or '').lower()
+                is_final = any(k in status_lower for k in ['delivered', 'dostarczon', 'odebran', 'picked up', 'zwrócon', 'zwrocon', 'zamknięt', 'zamkniet'])
+                if is_final:
+                    logging.info(f"🛑 REPROCESS: wykryto status końcowy ({status_lower}). Kończę dalsze przetwarzanie historii dla {target_email}.")
+                    break
                 
         except Exception as e:
             logging.error(f"Błąd przy reprocess maila: {e}")

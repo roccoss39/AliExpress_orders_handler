@@ -275,14 +275,15 @@ class InPostCarrier(BaseCarrier):
                 "Gotowa do odbioru (InPost)",                   # I: Status
                 email_date_str,                                 # J: Order Date (NEW)
                 est_delivery,                                   # K: Est Delivery (NEW)
-                order_data.get("qr_code", ""),                  # L: QR
+                self.sheets_handler._format_clickable_qr(order_data.get("qr_code", "")),  # L: QR
                 "",                                             # M: Order Num
                 "",                                             # N: Info
                 order_data.get("package_number", ""),           # O: Pkg Num
                 ""                                              # P: Link (NEW)
             ]
             
-            self.sheets_handler.worksheet.append_row(row_data)
+            # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+            self.sheets_handler.worksheet.append_row(row_data, value_input_option="USER_ENTERED")
             
             # Formatowanie ostatniego wiersza
             last_row = len(self.sheets_handler.worksheet.get_all_values())
@@ -340,7 +341,8 @@ class DPDCarrier(BaseCarrier):
                 ""                                      # P
             ]
             
-            self.sheets_handler.worksheet.append_row(row_data)
+            # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+            self.sheets_handler.worksheet.append_row(row_data, value_input_option="USER_ENTERED")
             last_row = len(self.sheets_handler.worksheet.get_all_values())
             self.sheets_handler.worksheet.format(f"A{last_row}:P{last_row}", {"backgroundColor": self.colors["delivered"]})
             return True
@@ -382,7 +384,8 @@ class DPDCarrier(BaseCarrier):
                 ""                                      # P
             ]
             
-            self.sheets_handler.worksheet.append_row(row_data)
+            # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+            self.sheets_handler.worksheet.append_row(row_data, value_input_option="USER_ENTERED")
             last_row = len(self.sheets_handler.worksheet.get_all_values())
             self.sheets_handler.worksheet.format(f"A{last_row}:P{last_row}", {"backgroundColor": self.colors["transit"]})
             return True
@@ -452,7 +455,8 @@ class DHLCarrier(BaseCarrier):
                 ""                                      # P
             ]
             
-            self.sheets_handler.worksheet.append_row(row_data)
+            # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+            self.sheets_handler.worksheet.append_row(row_data, value_input_option="USER_ENTERED")
             last_row = len(self.sheets_handler.worksheet.get_all_values())
             self.sheets_handler.worksheet.format(f"A{last_row}:P{last_row}", {"backgroundColor": self.colors["shipment_sent"]})
             return True
@@ -491,7 +495,8 @@ class DHLCarrier(BaseCarrier):
                 ""                                      # P
             ]
             
-            self.sheets_handler.worksheet.append_row(row_data)
+            # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+            self.sheets_handler.worksheet.append_row(row_data, value_input_option="USER_ENTERED")
             last_row = len(self.sheets_handler.worksheet.get_all_values())
             self.sheets_handler.worksheet.format(f"A{last_row}:P{last_row}", {"backgroundColor": self.colors["pickup"]})
             return True
@@ -548,7 +553,8 @@ class AliExpressCarrier(BaseCarrier):
                 order_data.get("item_link", "")                 # P: Link (NEW LOCATION!)
             ]
             
-            self.sheets_handler.worksheet.append_row(row_data)
+            # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+            self.sheets_handler.worksheet.append_row(row_data, value_input_option="USER_ENTERED")
             last_row = len(self.sheets_handler.worksheet.get_all_values())
             self.sheets_handler.worksheet.format(f"A{last_row}:P{last_row}", {"backgroundColor": self.colors["transit"]})
             return True

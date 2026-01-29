@@ -8,6 +8,38 @@ from datetime import datetime, timedelta
 from carriers_sheet_handlers import Col, EmailAvailabilityManager, InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier
 
 class SheetsHandler:
+    def _format_clickable_qr(self, qr_value: str) -> str:
+        """Zwraca wartość do kolumny QR (L) jako klikalny link.
+
+        - Jeśli `qr_value` jest URL (http/https) -> zwraca formułę =HYPERLINK(url, "QR")
+        - Jeśli `qr_value` wygląda jak dane InPost typu "P|phone|code" -> tworzy URL do api.qrserver.com
+        - W pozostałych przypadkach zwraca oryginalną wartość
+
+        Uwaga: używamy HYPERLINK, żeby w arkuszu był zawsze klikalny "przycisk".
+        """
+        if not qr_value:
+            return ""
+
+        qr_value = str(qr_value).strip()
+        if not qr_value:
+            return ""
+
+        # Jeśli to nie jest URL, ale wygląda jak payload do QR, budujemy URL
+        if not (qr_value.startswith('http://') or qr_value.startswith('https://')):
+            # typowy format: P|908009092|464714
+            if '|' in qr_value and qr_value.startswith('P|'):
+                from urllib.parse import quote
+                qr_value = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(qr_value)}"
+            else:
+                # nie znamy formatu -> zostaw tekst
+                return qr_value
+
+        # Escapuj cudzysłowy dla formuły
+        safe_url = qr_value.replace('"', '""')
+        # Uwaga dot. lokalizacji: w polskim Sheets funkcja to HIPERŁĄCZE, a separatorem argumentów jest ';'.
+        # Przy zapisie przez API zdarza się, że formuły w wersji EN/ze złym separatorem są traktowane jak tekst.
+        return f"=HIPERŁĄCZE(\"{safe_url}\";\"QR\")"
+
     _instance = None
     _spreadsheet = None
     
@@ -296,14 +328,15 @@ class SheetsHandler:
                 f"{status} ({carrier})",                    # I
                 email_date,                                 # J
                 est_delivery,                               # K
-                order_data.get("qr_code", ""),              # L
+                self._format_clickable_qr(order_data.get("qr_code", "")),  # L
                 f"'{order_num}" if order_num else "",       # M
                 order_data.get("info", ""),                 # N
                 f"'{pkg_num}" if pkg_num else "",           # O
                 order_data.get("item_link", "")             # P
             ]
             
-            self.worksheet.append_row(row_data, table_range="A1")
+            # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+            self.worksheet.append_row(row_data, table_range="A1", value_input_option="USER_ENTERED")
             new_row_idx = len(self.worksheet.col_values(1)) # Szybsze sprawdzenie długości
             
             # Kolory
@@ -484,10 +517,16 @@ class SheetsHandler:
             # 9. Status
             row[Col.STATUS - 1] = get_val('status')
             
-            # 10. Data zamówienia
-            order_date = get_val('order_date') or get_val('shipping_date')
-            if not order_date:
-                order_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+            # 10. Data zamówienia (Kolumna J)
+            # Założenie: ma się ustawić raz (najlepiej z maila potwierdzającego) i nie zmieniać się później.
+            # Preferencje źródeł:
+            # 1) order_date z AI (często DD.MM.YYYY)
+            # 2) jeśli status to confirmed i mamy email_date, ustaw jako datę zamówienia
+            # 3) w pozostałych przypadkach zostaw puste (żeby nie wpisywać błędnie "teraz")
+            order_date = get_val('order_date')
+            status_lower = str(order_data.get('status', '') or '').lower()
+            if not order_date and 'confirmed' in status_lower and email_date:
+                order_date = email_date
             row[Col.ORDER_DATE - 1] = order_date
             
             # 11. ✅ Przewidywana dostawa (Z NAPRAWIONĄ LOGIKĄ)
@@ -501,8 +540,9 @@ class SheetsHandler:
                 calculated_date = self.calculate_fallback_delivery_date(carrier_name, email_date)
                 row[Col.EST_DELIVERY - 1] = calculated_date
             
-            # 12. QR Link
-            row[Col.QR - 1] = get_val('qr_code') or get_val('qr_link')
+            # 12. QR Link (zawsze klikalny)
+            qr_raw = get_val('qr_code') or get_val('qr_link')
+            row[Col.QR - 1] = self._format_clickable_qr(qr_raw)
             
             # 13. Numer Zamówienia
             row[Col.ORDER_NUM - 1] = get_val('order_number')
@@ -523,7 +563,8 @@ class SheetsHandler:
             row[Col.LINK - 1] = get_val('tracking_link') or get_val('item_link')
 
             # --- ZAPIS DO ARKUSZA ---
-            self.worksheet.append_row(row, table_range = "A1")
+            # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+            self.worksheet.append_row(row, table_range="A1", value_input_option="USER_ENTERED")
             logging.info(f"🆕 Dodano BOGATY wiersz dla zamówienia {get_val('order_number')}")
             
             # Kolorowanie
@@ -577,6 +618,7 @@ class SheetsHandler:
             # Linki
             tracking_link = get_val('tracking_link') or get_val('item_link')
             qr_link = get_val('qr_code') or get_val('qr_link')
+            qr_link = self._format_clickable_qr(qr_link)
             
             # Info + Carrier (Budowanie ładnego stringa)
             carrier = order_data.get('carrier', 'Unknown')
@@ -597,6 +639,22 @@ class SheetsHandler:
             # Te pola aktualizujemy prawie zawsze (Status i Data Maila)
             update_if_exists(Col.STATUS, get_val('status'))
             update_if_exists(Col.MSG_DATE, get_val('email_date'))
+
+            # Data zamówienia (Kolumna J) - ustaw tylko raz.
+            # Jeśli wiersz ma puste J i przychodzi mail 'confirmed' (albo AI podało order_date), uzupełnij.
+            new_order_date = get_val('order_date')
+            status_lower = str(order_data.get('status', '') or '').lower()
+            if not new_order_date and 'confirmed' in status_lower:
+                new_order_date = get_val('email_date')
+
+            if new_order_date and new_order_date.strip():
+                try:
+                    existing_order_date = self.worksheet.cell(row_index, Col.ORDER_DATE).value
+                except Exception:
+                    existing_order_date = None
+
+                if not existing_order_date or not str(existing_order_date).strip():
+                    update_if_exists(Col.ORDER_DATE, new_order_date)
             
             # Kluczowe dane paczkowe
             update_if_exists(Col.PICKUP_CODE, get_val('pickup_code'))
@@ -619,7 +677,8 @@ class SheetsHandler:
             if cells_to_update:
                 logging.info(f"🐞 [DEBUG] Czekam 1s przed zapisem wiersza {row_index}...") 
                 time.sleep(1) 
-                self.worksheet.update_cells(cells_to_update)
+                # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
+                self.worksheet.update_cells(cells_to_update, value_input_option="USER_ENTERED")
                 logging.info(f"✅ Zaktualizowano {len(cells_to_update)} pól w wierszu {row_index}")
 
             # --- 4. 🎨 AKTUALIZACJA KOLORU (Zależna od kuriera!) ---

@@ -61,14 +61,27 @@ class EmailHandler:
                     normalized_data = {}
                     for key, value in raw_data.items():
                         normalized_key = key.lower().strip()
+                        # Migracja: usuń artefakt "__tombstones__" jeśli kiedykolwiek został zapisany
+                        if normalized_key == '__tombstones__':
+                            continue
                         normalized_data[normalized_key] = value
+
+                    # jeśli coś usunęliśmy, zapisz z powrotem (żeby nie zostawało w pliku)
+                    if '__tombstones__' in raw_data:
+                        try:
+                            with open(self.mappings_file, 'w', encoding='utf-8') as wf:
+                                json.dump(normalized_data, wf, indent=2, ensure_ascii=False)
+                            logging.info("🧹 Usunięto '__tombstones__' z user_mappings.json (migracja)")
+                        except Exception:
+                            pass
+
                     return normalized_data
             except Exception as e:
                 logging.error(f"Błąd podczas ładowania mapowań: {e}")
         return {}
     
     def _save_mappings(self):
-        """Zapisuje mapowania użytkowników do pliku JSON z ładnym formatowaniem"""
+        """Zapisuje mapowania użytkowników do pliku JSON z ładnym formatowaniem."""
         try:
             with open(self.mappings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.user_mappings, f, indent=2, ensure_ascii=False)
@@ -77,11 +90,13 @@ class EmailHandler:
             logging.error(f"Błąd podczas zapisywania mapowań: {e}")
 
     def _save_user_order_mapping(self, user_key, order_number):
-        """Zapisuje powiązanie użytkownika z numerem zamówienia"""
+        """Zapisuje powiązanie użytkownika z numerem zamówienia."""
         if not user_key or not order_number:
             return
-            
+
         user_key = user_key.lower()
+        order_number = str(order_number).strip()
+
 
         if user_key not in self.user_mappings:
             self.user_mappings[user_key] = {
@@ -102,11 +117,13 @@ class EmailHandler:
             self._save_mappings()
 
     def _save_user_package_mapping(self, user_key, package_number):
-        """Zapisuje powiązanie użytkownika z numerem paczki"""
+        """Zapisuje powiązanie użytkownika z numerem paczki."""
         if not user_key or not package_number:
             return
-            
+
         user_key = user_key.lower()
+        package_number = str(package_number).strip()
+
 
         if user_key not in self.user_mappings:
             self.user_mappings[user_key] = {
@@ -250,11 +267,22 @@ class EmailHandler:
                     msg_list.sort(key=lambda x: int(x.decode()), reverse=True)
                     
                     for num in msg_list:
-                        res, msg_data = client.fetch(num, "(RFC822)")
+                        res, msg_data = client.fetch(num, "(RFC822 INTERNALDATE)")
                         if res != "OK": continue
                         
+                        # msg_data zwykle: [(b'...INTERNALDATE "..." RFC822 {..}', b'raw_bytes'), b')']
                         raw_email = msg_data[0][1]
+                        meta = msg_data[0][0]
                         email_message = email.message_from_bytes(raw_email)
+
+                        # Zapisz INTERNALDATE jako nagłówek pomocniczy (fallback dla brakującego Date)
+                        try:
+                            internaldate_match = re.search(rb'INTERNALDATE\s+"([^"]+)"', meta)
+                            if internaldate_match:
+                                internaldate_str = internaldate_match.group(1).decode('utf-8', errors='replace')
+                                email_message['X-IMAP-INTERNALDATE'] = internaldate_str
+                        except Exception:
+                            pass
                         
                         # Pobieranie daty maila do weryfikacji
                         email_date_str = self.extract_email_date(email_message)
@@ -377,18 +405,111 @@ class EmailHandler:
             return ""
     
     def extract_email_date(self, email_message):
-        """Wyciąga datę z nagłówka emaila"""
+        """Wyciąga datę z nagłówka emaila.
+
+        Zwraca czas w strefie Europe/Warsaw jako string 'YYYY-MM-DD HH:MM:SS'.
+
+        Dlaczego to bywa ważne:
+        - część maili ma nagłówek Date bez strefy czasowej (naive datetime)
+        - część ma nietypowy format, który `parsedate_to_datetime` może odrzucić
+
+        W takich przypadkach stosujemy bezpieczne fallbacki.
+        """
         try:
             date_header = email_message.get('Date')
-            if date_header:
-                dt_with_tz = parsedate_to_datetime(date_header)
-                dt_local = dt_with_tz.astimezone(self.local_tz)
-                return dt_local.strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                logging.warning("Brak nagłówka Date w emailu")
+            if not date_header:
+                # Fallback: część serwerów/wiadomości potrafi mieć pusty/missing Date.
+                # Próbujemy kilku alternatywnych nagłówków oraz Received.
+
+                debug_email_dates = getattr(config, 'DEBUG_EMAIL_DATES', False)
+
+                # 0) Diagnostyka: jakie nagłówki w ogóle są dostępne
+                if debug_email_dates:
+                    try:
+                        header_names = [k for (k, _) in email_message.items()]
+                        logging.info(f"🧾 EMAIL_DATE_DEBUG | Missing Date header. Available headers: {header_names}")
+                    except Exception:
+                        pass
+
+                # 1) Alternatywne nagłówki daty spotykane u providerów
+                #    X-IMAP-INTERNALDATE jest ustawiany przez nas przy fetchu z IMAP (najbardziej wiarygodne fallback źródło)
+                alt_date_headers = ['X-IMAP-INTERNALDATE', 'Delivery-date', 'Resent-Date', 'X-Original-Date', 'X-Received', 'Received-Date']
+                for hname in alt_date_headers:
+                    try:
+                        val = email_message.get(hname)
+                        if val:
+                            dt = parsedate_to_datetime(val)
+                            if dt:
+                                dt_local = self.local_tz.localize(dt) if dt.tzinfo is None else dt.astimezone(self.local_tz)
+                                logging.warning(f"⚠️ Brak Date. Używam fallbacku z {hname}: '{val}' -> {dt_local}")
+                                return dt_local.strftime('%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        continue
+
+                # 2) Received: w praktyce najczęściej zawiera datę po ostatnim średniku
+                received_headers = []
+                try:
+                    received_headers = email_message.get_all('Received') or []
+                except Exception:
+                    received_headers = []
+
+                import re
+                for received in reversed(received_headers):
+                    try:
+                        # Złap to, co jest po ostatnim ';' (obsługuje też folded headers)
+                        m = re.search(r';\s*(.+?)\s*$', str(received).replace('\r', '').replace('\n', ' '))
+                        if not m:
+                            continue
+                        candidate = m.group(1).strip()
+                        dt = parsedate_to_datetime(candidate)
+                        if dt:
+                            dt_local = self.local_tz.localize(dt) if dt.tzinfo is None else dt.astimezone(self.local_tz)
+                            logging.warning(
+                                f"⚠️ Brak Date. Używam fallbacku z Received: '{candidate}' -> {dt_local}"
+                            )
+                            return dt_local.strftime('%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        continue
+
+                logging.warning("Brak nagłówka Date w emailu (i nie udało się wyciągnąć z alt headers ani Received)")
                 return None
+
+            # 1) Główny parser (najlepszy, gdy format jest poprawny)
+            dt = parsedate_to_datetime(date_header)
+            if not dt:
+                raise ValueError("parsedate_to_datetime zwróciło None")
+
+            # 2) Jeśli brak tzinfo (naive datetime), przyjmij lokalną strefę (Warsaw)
+            #    zamiast wywalać wyjątek na astimezone().
+            if dt.tzinfo is None:
+                try:
+                    dt_local = self.local_tz.localize(dt)
+                except Exception:
+                    # super-awaryjnie: przypnij tz bez lokalize (gorsze dla DST, ale lepsze niż None)
+                    dt_local = dt.replace(tzinfo=self.local_tz)
+            else:
+                dt_local = dt.astimezone(self.local_tz)
+
+            return dt_local.strftime('%Y-%m-%d %H:%M:%S')
+
         except Exception as e:
-            logging.error(f"Błąd podczas wyciągania daty z emaila: {e}")
+            # 3) Fallback: starsza metoda z parsedate_tz + mktime_tz
+            #    Często działa, gdy parser "nowy" nie daje rady.
+            try:
+                import email.utils
+                date_header = email_message.get('Date')
+                date_tuple = email.utils.parsedate_tz(date_header) if date_header else None
+                if date_tuple:
+                    ts = email.utils.mktime_tz(date_tuple)
+                    dt_local = datetime.fromtimestamp(ts, tz=self.local_tz)
+                    logging.warning(
+                        f"⚠️ Fallback daty (parsedate_tz) dla nagłówka Date='{date_header}' -> {dt_local}"
+                    )
+                    return dt_local.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                pass
+
+            logging.error(f"Błąd podczas wyciągania daty z emaila. Date='{email_message.get('Date')}'. Error={e}")
             return None
     
     def should_update_based_on_date(self, new_email_date, existing_email_date):
@@ -457,8 +578,14 @@ class EmailHandler:
         processed_data = []
         
         emails_with_dates = []
+        debug_email_dates = getattr(config, 'DEBUG_EMAIL_DATES', False)
         for email_source, email_msg in emails:
+            raw_date_header = email_msg.get('Date')
             email_date = self.extract_email_date(email_msg)
+            if debug_email_dates:
+                logging.info(
+                    f"🕒 EMAIL_DATE_DEBUG | source={email_source} | Date='{raw_date_header}' | parsed='{email_date}'"
+                )
             emails_with_dates.append((email_source, email_msg, email_date))
         
         # ✅ LOGIKA SORTOWANIA Z CONFIGA
@@ -903,11 +1030,20 @@ class EmailHandler:
                 msg_ids.sort(key=lambda x: int(x.decode()), reverse=False)
                 
                 for num in msg_ids:
-                    res, msg_data = client.fetch(num, "(RFC822)")
+                    res, msg_data = client.fetch(num, "(RFC822 INTERNALDATE)")
                     if res == "OK":
                         raw_email = msg_data[0][1]
+                        meta = msg_data[0][0]
                         try:
                             msg = email.message_from_bytes(raw_email)
+                            # Zapisz INTERNALDATE jako nagłówek pomocniczy (fallback dla brakującego Date)
+                            try:
+                                internaldate_match = re.search(rb'INTERNALDATE\s+"([^"]+)"', meta)
+                                if internaldate_match:
+                                    internaldate_str = internaldate_match.group(1).decode('utf-8', errors='replace')
+                                    msg['X-IMAP-INTERNALDATE'] = internaldate_str
+                            except Exception:
+                                pass
                         except:
                             try:
                                 msg = email.message_from_string(raw_email.decode('utf-8', errors='ignore'))

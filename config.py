@@ -107,3 +107,6 @@ TELEGRAM_CHAT_ID = os.getenv('_TELEGRAM_CHAT_ID')
 LOG_TO_FILE = True        # True = zapisuje do pliku .log
 LOG_TO_CONSOLE = True      # True = wypisuje logi w terminalu
 LOG_FILE_NAME = "aliexpress_tracker.log"
+
+# Debug: logowanie nagłówka Date i wyliczonej daty maila
+DEBUG_EMAIL_DATES = True

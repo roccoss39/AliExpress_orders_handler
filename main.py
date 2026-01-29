@@ -206,6 +206,15 @@ if __name__ == "__main__":
     parser.add_argument("--menu", action="store_true", help="Uruchom menu diagnostyczne")
     parser.add_argument("--reprocess-email", type=str, help="Wymuś ponowne przetworzenie maili dla podanego adresu")
     parser.add_argument("--limit", type=int, help="Maksymalna liczba maili do przetworzenia (dla trybu reprocess)")
+    parser.add_argument(
+        "--subject-contains",
+        type=str,
+        default="",
+        help=(
+            "(Reprocess) Przetwarzaj tylko maile, których temat zawiera podaną frazę (case-insensitive). "
+            "Np. --subject-contains czek"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -213,7 +222,7 @@ if __name__ == "__main__":
         show_diagnostic_menu()
     
     elif args.reprocess_email:
-        run_reprocess(args.reprocess_email, limit=args.limit)
+        run_reprocess(args.reprocess_email, limit=args.limit, subject_contains=args.subject_contains)
         
     else:
         print("Uruchamianie głównej pętli. Naciśnij Ctrl+C aby zatrzymać.")

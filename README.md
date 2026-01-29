@@ -81,6 +81,10 @@ Orders (Główna tabela):
 
 Przechowuje dane o paczkach (Email, Produkt, Tracking, Status, Linki, QR, itd.).
 
+QR w arkuszu:
+- Kolumna QR jest zapisywana jako formuła (dla polskiej lokalizacji Google Sheets): `=HIPERŁĄCZE("URL";"QR")`
+  żeby link był zawsze klikalny (nie jako zwykły tekst).
+
 Accounts (Baza kont):
 
 Kolumna A: Adres Email.
@@ -120,10 +124,14 @@ Jak używać:
 Bash
 
 # Składnia:
-# python3 main.py --reprocess-email <ADRES_EMAIL> --limit <LICZBA_MAILI>
+# python3 main.py --reprocess-email <ADRES_EMAIL> [--limit <LICZBA_MAILI>] [--subject-contains <FRAZA>]
 
-# Przykład 1: Przetwórz 10 ostatnich zamówień dla konkretnego konta
+# Przykład 1: Przetwórz 10 ostatnich maili dla konkretnego konta
 python3 main.py --reprocess-email jan.kowalski@interia.pl --limit 10
+
+# Przykład 1b: Przetwórz tylko maile, których temat zawiera daną frazę (case-insensitive)
+# Np. dla tematu: "InPost - Paczka już na Ciebie czeka" zadziała fraza: "czek" lub "czeka"
+python3 main.py --reprocess-email jan.kowalski@interia.pl --limit 50 --subject-contains czek
 
 # Przykład 2: Pełny skan konta (bez limitu, domyślny zakres dni z configu)
 python3 main.py --reprocess-email jan.kowalski@interia.pl
@@ -179,21 +187,13 @@ sudo systemctl disable --now ali-tracker
 
 Aby pozniej wystartowac:
 sudo systemctl enable --now ali-tracker
-
 Po wystartowaniu zawsze warto sprawdzić status, aby upewnić się, że bot nie wywalił się na starcie (np. przez błąd w kodzie):
-
-Bash
 
 sudo systemctl status ali-tracker
 
 Ponowne uruchomienie (np. po zmianie kodu lub configu):
-
-Bash
-
 sudo systemctl restart ali-tracker
 Sprawdzenie statusu i logów:
-
-Bash
 
 sudo systemctl status ali-tracker
 # Podgląd logów na żywo:

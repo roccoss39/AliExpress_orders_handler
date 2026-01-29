@@ -1010,6 +1010,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             - Telefon do odboru (phone_number) - jeśli dostępny
             - Link do kodu QR (qr_code) dla dhl np. https://ccs-image.dhl.com/barcodes/e845cbd1-eac1-4a2a-ab05-d039c8b9ce78.jpg
               lub dla Inpost "P|phone|pickup_code" czyli np. "P|908009092|464714" (bez spacji) i wstaw do szalbonu https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=QR_CONTENT czyli https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=P|908009092|464714
+            - Pamietaj, dLa kodu qr nie pomijaj przedrostka https://
 
             3. DORĘCZONO - Email potwierdzający dostarczenie paczki.
             Z tego typu maila wyciągnij:
