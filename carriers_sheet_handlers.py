@@ -34,7 +34,7 @@ class BaseCarrier:
         self.sheets_handler = sheets_handler
         
         self.name = "Unknown"
-        # Domyślne kolory
+        # Domyślne kolory (mogą być nadpisane przez klasy pochodne)
         self.colors = {
             "shipment_sent": {"red": 0.9, "green": 0.9, "blue": 0.9},
             "pickup": {"red": 1.0, "green": 1.0, "blue": 0.8},
@@ -45,26 +45,11 @@ class BaseCarrier:
             "unknown": {"red": 1.0, "green": 1.0, "blue": 1.0}
         }
 
-    def get_status_priority(self, status_text):
-        """Zwraca priorytet statusu (im wyższa liczba, tym ważniejszy status)."""
-        if not status_text: return 0
-        status = status_text.lower()
-        
-        if "unknown" in status or "nieznan" in status: return 0
-        if "confirmed" in status or "zatwierdzon" in status or "potwierdzon" in status: return 1
-        if "transit" in status or "transporcie" in status or "drodze" in status: return 2
-        if "shipment_sent" in status or "nadan" in status: return 3
-        if "pickup" in status or "odbioru" in status or "awizo" in status or "placówce" in status: return 4
-        if "delivered" in status or "dostarczon" in status or "odebran" in status: return 5
-        if "closed" in status or "zamknięte" in status or "canceled" in status or "anulowan" in status or "zwrot" in status: return 1
-        return 0
-
     def update_shipment_sent(self, row, order_data):
         """Aktualizuje wiersz dla statusu 'shipment_sent'."""
         try:
             # 1. Pobierz obecne dane
             existing_values = self.sheets_handler.worksheet.row_values(row)
-            # Uzupełnij listę pustymi stringami, jeśli wiersz jest krótszy niż P (16)
             while len(existing_values) < Col.LINK: existing_values.append("")
             
             existing_pkg = existing_values[Col.PKG_NUM - 1] 
@@ -73,16 +58,15 @@ class BaseCarrier:
             clean_existing = existing_pkg.replace("'", "").strip()
             clean_new = new_pkg.replace("'", "").strip() if new_pkg else ""
             
+            # Logika podmiany numeru paczki (np. zmiana z Ali-LP na InPost)
             if clean_existing and clean_new and clean_existing != clean_new:
                 logging.info(f"🔄 ZMIANA NUMERU PACZKI (Handover): {clean_existing} -> {clean_new}")
                 
-                # Info jest w kolumnie N (Col.INFO)
                 current_info = existing_values[Col.INFO - 1]
                 if clean_existing not in current_info:
                      combined_info = f"{current_info} | Prev: {clean_existing}".strip(" | ")
                      self.sheets_handler.worksheet.update_cell(row, Col.INFO, combined_info)
                 
-                # Nadpisz numer paczki
                 self.sheets_handler.worksheet.update_cell(row, Col.PKG_NUM, f"'{clean_new}")
             
             elif not clean_existing and clean_new:
@@ -97,36 +81,32 @@ class BaseCarrier:
     def general_update_sheet_data(self, row, order_data, status_key):
         """Ogólna metoda aktualizacji danych w arkuszu z użyciem Col Enum"""
         try:
-            # 1. Pobierz obecny status z arkusza (Kolumna I / Col.STATUS)
+            # 1. Pobierz obecny status z arkusza
             current_status = self.sheets_handler.worksheet.cell(row, Col.STATUS).value or ""
             
-            # 2. Sprawdź priorytety
-            priority_current = self.get_status_priority(current_status)
-            priority_new = self.get_status_priority(status_key)
+            # 2. ✅ ZMIANA: Sprawdź priorytety używając funkcji z SheetsHandler
+            # To jest Twoje "Single Source of Truth"
+            priority_current = self.sheets_handler._get_status_priority(current_status)
+            priority_new = self.sheets_handler._get_status_priority(status_key)
             
-            # BLOKADY
+            # BLOKADY (Jeśli nowy status jest słabszy niż obecny, przerywamy)
             if priority_new == 0 and priority_current > 0: return False
-            if priority_new < priority_current: return False
+            if priority_new < priority_current: 
+                logging.info(f"⛔ Blokada aktualizacji: '{status_key}' ({priority_new}) < '{current_status}' ({priority_current})")
+                return False
 
             # 3. Przygotuj dane do aktualizacji
             updates = []
             
-            # --- AKTUALIZACJA DAT (Nowa funkcjonalność J i K) ---
+            # --- DATY ---
             email_date_str = order_data.get("email_date", "")
-            
-            # H: Data ostatniego maila (zawsze aktualizuj)
             if email_date_str:
                 updates.append({'range': f'H{row}', 'values': [[email_date_str]]})
             
-            # J & K: Data zamówienia i Przewidywana dostawa
-            # Sprawdzamy czy wiersz ma już datę zamówienia. Jeśli nie - wpisujemy.
+            # Logika daty zamówienia i estymacji (jeśli puste)
             current_order_date = self.sheets_handler.worksheet.cell(row, Col.ORDER_DATE).value
-            
             if not current_order_date and email_date_str:
-                # Wpisz datę pierwszego maila do kolumny J
                 updates.append({'range': f'J{row}', 'values': [[email_date_str]]})
-                
-                # Oblicz +10 dni dla kolumny K
                 try:
                     dt_obj = None
                     if len(email_date_str) > 10:
@@ -135,46 +115,37 @@ class BaseCarrier:
                         dt_obj = datetime.strptime(email_date_str, '%Y-%m-%d')
                     
                     if dt_obj:
+                        # Domyślne wyliczenie +10 dni (można ulepszyć biorąc logikę z SheetsHandler)
                         est_date = dt_obj + timedelta(days=10)
                         est_date_str = est_date.strftime('%Y-%m-%d')
                         updates.append({'range': f'K{row}', 'values': [[est_date_str]]})
-                        logging.info(f"📅 Ustawiono przewidywaną dostawę na: {est_date_str}")
-                except Exception as de:
-                    logging.warning(f"Nie udało się obliczyć daty dostawy: {de}")
+                except Exception: pass
 
-            # --- RESZTA DANYCH ---
-            
-            # I: Status
+            # --- DANE ---
             carrier_display = order_data.get("carrier", self.name)
-            status_text = status_key
-            if status_key == "shipment_sent": status_text = f"Przesyłka nadana ({carrier_display})"
-            elif status_key == "pickup": status_text = f"Gotowa do odbioru ({carrier_display})"
-            elif status_key == "delivered": status_text = f"Dostarczona ({carrier_display})"
-            elif status_key == "transit": status_text = f"W transporcie ({carrier_display})"
-            elif status_key == "unknown": status_text = f"Status nieznany: {order_data.get('status', 'unknown')}"
-            elif status_key == "confirmed": status_text = f"Zamówienie potwierdzone ({carrier_display})"
+            
+            # Ładne formatowanie statusu
+            status_map = {
+                "shipment_sent": f"Przesyłka nadana ({carrier_display})",
+                "pickup": f"Gotowa do odbioru ({carrier_display})",
+                "delivered": f"Dostarczona ({carrier_display})",
+                "transit": f"W transporcie ({carrier_display})",
+                "confirmed": f"Zamówienie potwierdzone ({carrier_display})",
+                "created_by_inpost": f"Etykieta utworzona ({carrier_display})"
+            }
+            status_text = status_map.get(status_key, f"Status: {order_data.get('status', status_key)}")
             
             updates.append({'range': f'I{row}', 'values': [[status_text]]})
             
-            # M: Numer zamówienia (Col.ORDER_NUM)
-            order_num = order_data.get("order_number", "")
-            if order_num and "ul." not in str(order_num).lower():
-                 updates.append({'range': f'M{row}', 'values': [[f"'{order_num}"]]})
-
-            # N: Info (Col.INFO)
+            # Kolumny opcjonalne (tylko jeśli są dane)
+            if order_data.get("order_number"):
+                 updates.append({'range': f'M{row}', 'values': [[f"'{order_data['order_number']}"]]})
             if order_data.get("info"):
                 updates.append({'range': f'N{row}', 'values': [[order_data["info"]]]})
-                
-            # O: Numer paczki (Col.PKG_NUM)
-            pkg_num = order_data.get("package_number", "")
-            if pkg_num:
-                updates.append({'range': f'O{row}', 'values': [[f"'{pkg_num}"]]})
-
-            # C: Adres (Col.ADDRESS)
+            if order_data.get("package_number"):
+                updates.append({'range': f'O{row}', 'values': [[f"'{order_data['package_number']}"]]})
             if order_data.get("delivery_address"):
                 updates.append({'range': f'C{row}', 'values': [[order_data["delivery_address"]]]})
-            
-            # P: Link (Col.LINK) - Przeniesione z K!
             if order_data.get("item_link"):
                 updates.append({'range': f'P{row}', 'values': [[order_data["item_link"]]]})
 
@@ -190,7 +161,7 @@ class BaseCarrier:
                     "textFormat": {"foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0}}
                 })
                 
-            # Przenieś do Delivered jeśli zakończone
+            # 6. Archiwizacja jeśli dostarczono
             if status_key == "delivered":
                 self.sheets_handler.move_row_to_delivered(row, order_data)
                 
@@ -204,7 +175,7 @@ class BaseCarrier:
             return False
 
     def create_shipment_row(self, order_data):
-        """Tworzy NOWY wiersz dla przesyłki"""
+        """Tworzy NOWY wiersz dla przesyłki (deleguje do SheetsHandler)"""
         return self.sheets_handler._direct_create_row(order_data)
         
     def process_notification(self, order_data):

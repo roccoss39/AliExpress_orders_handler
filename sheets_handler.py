@@ -428,11 +428,12 @@ class SheetsHandler:
         
         if "unknown" in status or "nieznan" in status: return 0
         if "confirmed" in status or "zatwierdzon" in status or "potwierdzon" in status or "created_by_inpost" in status:  return 1
-        if "transit" in status or "transporcie" in status or "drodze" in status: return 2
-        if "shipment_sent" in status or "nadan" in status: return 3
-        if "pickup" in status or "odbioru" in status or "awizo" in status or "placówce" in status: return 4
-        if "delivered" in status or "dostarczon" in status or "odebran" in status: return 5
-        if "closed" in status or "zamknięte" in status or "canceled" in status or "anulowan" in status or "zwrot" in status: return 1
+        if "closed" in status or "zamknięte" in status or "canceled" in status or "anulowan" in status or "zwrot" in status: return 2
+        if "transit" in status or "transporcie" in status or "drodze" in status: return 3
+        if "shipment_sent" in status or "nadan" in status: return 4
+        if "pickup" in status or "odbioru" in status or "awizo" in status or "placówce" in status: return 5
+        if "delivered" in status or "dostarczon" in status or "odebran" in status: return 6
+        
         return 0
     
     def append_order(self, order_data):

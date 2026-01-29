@@ -1061,6 +1061,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             - PRZEANALIZUJ DOKŁADNIE CZY PACZKA Z DHL JEST DOPIERO WYSŁANA CZY JUŻ DO ODBIORU i ustal odpowiednio status
             - ZWRÓĆ TYLKO JSON z danymi, nie dodawaj żadnych dodatkowych informacji ani komentarzy
             - Dla GLS format może się róznić - tylko dla niego sam oceń
+            - Jeśli numer zawiera prefiks +48, usuń go i podaj tylko właściwe 9 cyfr numeru polskiego. Np. +48720191029 to numer: 720 191 029 (BEZ +48!)
 
             Jeśli dostałeś przypadkowy mail to zwróć pusty JSON: {{}}, jedynie w info i status zwróć "unknown" i "unknown" jako status.
 
