@@ -84,6 +84,7 @@ class AliexpressDataHandler(BaseDataHandler):
         # ✅ TYLKO BARDZO SPECYFICZNE SŁOWA KLUCZOWE
         keywords = [
             "zamówienie potwierdzone",        # Potwierdzenie zamówienia
+            "potwierdzone zamówienia",
             "order confirmed",                # Order confirmation
             "potwierdzenie zakupu",          # Purchase confirmation
             "is closed",                     # Order closed
@@ -212,8 +213,18 @@ class AliexpressDataHandler(BaseDataHandler):
         # Wzorzec 1: Szukaj w temacie
         # DODANO: 'Your' oraz obsługę numeru występującego przed 'is closed'
         patterns = [
-            r'(?:Zamówienie|Order|Order ID|Your)[:\s#]+(\d{10,})',  # Standardowe: Order 123... lub Your 123...
-            r'(\d{15,16})\s+is\s+closed'                             # Specyficzne: 123... is closed
+            # Standardowe: "Zamówienie 3067..." / "Order 3067..." / "Order ID 3067..." / "Your 3067..."
+            r'(?:Zamówienie|Order|Order ID|Your)[:\s#]+(\d{10,})',
+
+            # Specyficzne: "123... is closed"
+            r'(\d{15,16})\s+is\s+closed',
+
+            # Nowe: tematy zbiorcze typu: "3 – potwierdzone zamówienia, w tym: 3068187151905886 i inne"
+            r'\bw\s*tym\s*[:\-]?\s*(\d{10,})',
+
+            # Nowe: czasem temat zawiera tylko goły numer (bez słowa "Zamówienie")
+            # Uwaga: łapiemy 14-20 cyfr jako kompromis (mniejsze ryzyko fałszywych trafień)
+            r'(?<!\d)(\d{14,20})(?!\d)'
         ]
         
         for pattern in patterns:

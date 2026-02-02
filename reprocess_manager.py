@@ -33,7 +33,10 @@ def run_reprocess(target_email, limit=None, subject_contains: str = ""):
         return
 
     logging.info(f"Pobrano {len(emails)} maili. Analiza...")
-    processed_count = 0 
+    processed_count = 0
+    skipped_subject_filter = 0
+    analyzed_but_no_data = 0
+    analyzed_total = 0
     
     # 2. Przetwarzaj maile
     for source, msg in emails:
@@ -48,13 +51,14 @@ def run_reprocess(target_email, limit=None, subject_contains: str = ""):
 
             # Opcjonalny filtr po fragmencie tematu (case-insensitive)
             if subject_contains_norm and subject_contains_norm not in subject.lower():
+                skipped_subject_filter += 1
+                logging.debug(
+                    f"REPROCESS: pomijam mail (subject_contains='{subject_contains_norm}'). Subject='{subject[:120]}'"
+                )
                 continue
             
-            # Szybki filtr po słowach kluczowych
-            keywords = ["paczka", "zamówienie", "order", "delivery", "dostawa", "odbierz", "nadana", "status", "inpost", "dhl", "dpd", "gls", "poczta"]
-            if not any(k in subject.lower() for k in keywords):
-                continue
-
+            # Reprocess ma działać jak main: nie filtrujemy maili po słowach-kluczach.
+            # Jedyny filtr to opcjonalny --subject-contains.
             body = email_handler.get_email_body(msg)
             
             # Wyciągnij odbiorcę
@@ -66,6 +70,7 @@ def run_reprocess(target_email, limit=None, subject_contains: str = ""):
             logging.info(f"🔍 Analiza: {email_date} | {subject[:50]}...")
             
             # Wymuś przetwarzanie (force_process=True)
+            analyzed_total += 1
             order_data = email_handler.analyze_email(
                 subject, body, recipient, source, 
                 recipient_name=recipient, email_message=msg, email_date=email_date,
@@ -76,38 +81,44 @@ def run_reprocess(target_email, limit=None, subject_contains: str = ""):
                 # Uzupełnij datę jeśli brakuje
                 if not order_data.get("email_date") and email_date:
                     order_data["email_date"] = email_date
-                
-                # Zapisz mapowania
-                status_lower = str(order_data.get('status', '') or '').lower()
-                is_final = any(k in status_lower for k in ['delivered', 'dostarczon', 'odebran', 'picked up', 'zwrócon', 'zwrocon', 'zamknięt', 'zamkniet'])
+            else:
+                analyzed_but_no_data += 1
+                logging.debug(
+                    f"REPROCESS: analyze_email zwróciło None. Subject='{subject[:120]}' source={source}"
+                )
+                continue
 
-                user_key = order_data.get("user_key")
-                if user_key and not is_final:
-                    if order_data.get("order_number"):
-                        email_handler._save_user_order_mapping(user_key, order_data["order_number"])
-                    if order_data.get("package_number"):
-                        email_handler._save_user_package_mapping(user_key, order_data["package_number"])
+            # Zapisz mapowania
+            status_lower = str(order_data.get('status', '') or '').lower()
+            is_final = any(k in status_lower for k in ['delivered', 'dostarczon', 'odebran', 'picked up', 'zwrócon', 'zwrocon', 'zamknięt', 'zamkniet'])
 
-                # Wybierz metodę aktualizacji arkusza
-                if hasattr(sheets_handler, 'handle_order_update'):
-                    sheets_handler.handle_order_update(order_data)
+            user_key = order_data.get("user_key")
+            if user_key and not is_final:
+                if order_data.get("order_number"):
+                    email_handler._save_user_order_mapping(user_key, order_data["order_number"])
+                if order_data.get("package_number"):
+                    email_handler._save_user_package_mapping(user_key, order_data["package_number"])
+
+            # Wybierz metodę aktualizacji arkusza
+            if hasattr(sheets_handler, 'handle_order_update'):
+                sheets_handler.handle_order_update(order_data)
+            else:
+                # Fallback dla starszych wersji sheets_handler
+                carrier = sheets_handler.carriers.get(order_data.get("carrier", "InPost"))
+                if carrier and hasattr(carrier, 'process_notification'):
+                    carrier.process_notification(order_data)
                 else:
-                    # Fallback dla starszych wersji sheets_handler
-                    carrier = sheets_handler.carriers.get(order_data.get("carrier", "InPost"))
-                    if carrier and hasattr(carrier, 'process_notification'):
-                        carrier.process_notification(order_data)
-                    else:
-                        sheets_handler._direct_create_row(order_data)
-                
-                processed_count += 1
+                    sheets_handler._direct_create_row(order_data)
 
-                # Jeśli w reprocess trafiliśmy na status końcowy, to dalsze maile historyczne
-                # mogą tylko "reanimować" mappingi i robić szum. Kończymy reprocess dla tego konta.
-                status_lower = str(order_data.get('status', '') or '').lower()
-                is_final = any(k in status_lower for k in ['delivered', 'dostarczon', 'odebran', 'picked up', 'zwrócon', 'zwrocon', 'zamknięt', 'zamkniet'])
-                if is_final:
-                    logging.info(f"🛑 REPROCESS: wykryto status końcowy ({status_lower}). Kończę dalsze przetwarzanie historii dla {target_email}.")
-                    break
+            processed_count += 1
+
+            # Jeśli w reprocess trafiliśmy na status końcowy, to dalsze maile historyczne
+            # mogą tylko "reanimować" mappingi i robić szum. Kończymy reprocess dla tego konta.
+            status_lower = str(order_data.get('status', '') or '').lower()
+            is_final = any(k in status_lower for k in ['delivered', 'dostarczon', 'odebran', 'picked up', 'zwrócon', 'zwrocon', 'zamknięt', 'zamkniet'])
+            if is_final:
+                logging.info(f"🛑 REPROCESS: wykryto status końcowy ({status_lower}). Kończę dalsze przetwarzanie historii dla {target_email}.")
+                break
                 
         except Exception as e:
             logging.error(f"Błąd przy reprocess maila: {e}")
@@ -119,4 +130,9 @@ def run_reprocess(target_email, limit=None, subject_contains: str = ""):
     except Exception as e:
         logging.error(f"❌ Błąd aktualizacji kolorów: {e}")
             
-    logging.info(f"🏁 Zakończono reprocess. Przetworzono: {processed_count} zamówień.")
+    summary = (
+        f"🏁 Zakończono reprocess. Przetworzono: {processed_count} zamówień. "
+        f"Analizowano: {analyzed_total} maili. "
+        f"Pominięto: subject_filter={skipped_subject_filter}, analyze_none={analyzed_but_no_data}."
+    )
+    logging.info(summary)
