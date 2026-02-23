@@ -739,7 +739,7 @@ class EmailHandler:
                     logging.info(f"🤖 Uruchamiam analizę AI dla {handler.name} (Priorytet AI)...")
                     try:
                         openai_data = self.openai_handler.general_extract_carrier_notification_data(
-                            body, subject, handler.name, recipient
+                            body, subject, handler.name, recipient, email_date=email_date
                         )
                         if openai_data:
                             if not openai_data.get("carrier"):

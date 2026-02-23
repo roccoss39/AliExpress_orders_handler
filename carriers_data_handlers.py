@@ -394,7 +394,7 @@ class InPostDataHandler(BaseDataHandler):
         
         # Użyj ChatGPT do ekstrakcji danych
         try:
-            openai_data = self.email_handler.openai_handler.extract_pickup_notification_data_inpost(body, subject)
+            openai_data = self.email_handler.openai_handler.extract_pickup_notification_data_inpost(body, subject, email_date=email_date if 'email_date' in locals() else None)
             
             # Wypełnij dane z ekstrakcji
             if openai_data.get("pickup_location"):

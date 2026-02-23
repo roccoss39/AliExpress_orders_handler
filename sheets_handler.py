@@ -9,13 +9,10 @@ from carriers_sheet_handlers import Col, EmailAvailabilityManager, InPostCarrier
 
 class SheetsHandler:
     def _format_clickable_qr(self, qr_value: str) -> str:
-        """Zwraca wartość do kolumny QR (L) jako klikalny link.
-
-        - Jeśli `qr_value` jest URL (http/https) -> zwraca formułę =HYPERLINK(url, "QR")
-        - Jeśli `qr_value` wygląda jak dane InPost typu "P|phone|code" -> tworzy URL do api.qrserver.com
-        - W pozostałych przypadkach zwraca oryginalną wartość
-
-        Uwaga: używamy HYPERLINK, żeby w arkuszu był zawsze klikalny "przycisk".
+        """Zwraca wartość do kolumny QR (L) jako czysty, klikalny link (URL).
+        
+        Google Sheets automatycznie zamienia pełne adresy URL na klikalne linki,
+        co jest w 100% odporne na problemy z polskimi formułami (HIPERŁĄCZE vs HYPERLINK).
         """
         if not qr_value:
             return ""
@@ -24,21 +21,37 @@ class SheetsHandler:
         if not qr_value:
             return ""
 
-        # Jeśli to nie jest URL, ale wygląda jak payload do QR, budujemy URL
+        # Jeśli to nie jest URL, ale wygląda jak payload do QR, budujemy URL do generatora
         if not (qr_value.startswith('http://') or qr_value.startswith('https://')):
             # typowy format: P|908009092|464714
             if '|' in qr_value and qr_value.startswith('P|'):
                 from urllib.parse import quote
-                qr_value = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(qr_value)}"
+                encoded_data = quote(qr_value, safe='')  # koduje | jako %7C
+                qr_value = f"https://quickchart.io/qr?text={encoded_data}&size=200"
             else:
-                # nie znamy formatu -> zostaw tekst
+                # nie znamy formatu -> zostaw czysty tekst
                 return qr_value
 
-        # Escapuj cudzysłowy dla formuły
-        safe_url = qr_value.replace('"', '""')
-        # Uwaga dot. lokalizacji: w polskim Sheets funkcja to HIPERŁĄCZE, a separatorem argumentów jest ';'.
-        # Przy zapisie przez API zdarza się, że formuły w wersji EN/ze złym separatorem są traktowane jak tekst.
-        return f"=HIPERŁĄCZE(\"{safe_url}\";\"QR\")"
+        # Jeśli AI zwróciło gotowy URL qrserver.com z | w data= — przebuduj go do quickchart.io
+        # (Google Sheets czasem ma problemy z niektórymi znakami w parametrach zapytania)
+        if 'qrserver.com' in qr_value and 'data=P' in qr_value:
+            from urllib.parse import urlparse, parse_qs, quote
+            try:
+                parsed = urlparse(qr_value)
+                qs = parse_qs(parsed.query)
+                data_val = qs.get('data', [''])[0]
+                if data_val:
+                    encoded_data = quote(data_val, safe='')
+                    qr_value = f"https://quickchart.io/qr?text={encoded_data}&size=200"
+            except Exception:
+                pass  # zostaw oryginalny URL jeśli parsowanie nie wyjdzie
+
+        # Zakoduj | jako %7C (dobra praktyka dla wszystkich linków w arkuszu)
+        qr_value = qr_value.replace('|', '%7C')
+        
+        # ZWRACAMY CZYSTY ADRES URL
+        # Ponieważ zrezygnowaliśmy z formuły, nie musimy się martwić o średniki czy przecinki
+        return qr_value
 
     _instance = None
     _spreadsheet = None
@@ -346,7 +359,13 @@ class SheetsHandler:
             if status.lower() in ["closed", "canceled", "anulowane"]:
                 bg_color = {"red": 1.0, "green": 0.2, "blue": 0.2}
                 text_color = {"red": 1.0, "green": 1.0, "blue": 1.0}
-
+                format_dict = {
+                    "backgroundColor": bg_color,
+                    "textFormat": {"foregroundColor": text_color, "bold": True}
+                }
+            else:
+                # Tylko tło, bez narzucania koloru tekstu, żeby link QR (niebieski) przetrwał!
+                format_dict = {"backgroundColor": bg_color}
             try:
                 self.worksheet.format(f"A{new_row_idx}:P{new_row_idx}", {
                     "backgroundColor": bg_color,
@@ -567,12 +586,25 @@ class SheetsHandler:
             self.worksheet.append_row(row, table_range="A1", value_input_option="USER_ENTERED")
             logging.info(f"🆕 Dodano BOGATY wiersz dla zamówienia {get_val('order_number')}")
             
-            # Kolorowanie
+            # Kolorowanie nowego wiersza (tylko kolor, bez nadpisywania danych)
             try:
-                time.sleep(1) 
+                time.sleep(1)
                 new_row_index = self.find_order_row(order_data)
                 if new_row_index:
-                    self.update_row_cells(new_row_index, order_data)
+                    new_status = order_data.get('status', '')
+                    carrier = order_data.get('carrier', 'Unknown')
+                    if new_status:
+                        color = self._get_status_color(new_status, carrier)
+                        
+                        # ✅ ZMIANA: Ustalamy TYLKO tło. Nie narzucamy czarnego tekstu!
+                        format_dict = {"backgroundColor": color}
+                        
+                        # (Opcjonalnie) Jeśli to status zamknięty, dajemy biały tekst
+                        if new_status.lower() in ["closed", "canceled", "anulowane"]:
+                            format_dict["textFormat"] = {"foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}, "bold": True}
+
+                        self.worksheet.format(f"A{new_row_index}:P{new_row_index}", format_dict)
+                        logging.info(f"🎨 Pokolorowano nowy wiersz {new_row_index} (Status: {new_status}, Carrier: {carrier})")
             except Exception as e:
                 logging.error(f"⚠️ Nie udało się pokolorować nowego wiersza: {e}")
             
@@ -676,7 +708,13 @@ class SheetsHandler:
             # --- 3. FIZYCZNA AKTUALIZACJA DANYCH ---
             if cells_to_update:
                 logging.info(f"🐞 [DEBUG] Czekam 1s przed zapisem wiersza {row_index}...") 
-                time.sleep(1) 
+                time.sleep(1)
+                # Wyczyść komórkę L przed zapisem formuły QR — Google Sheets cache'uje styl
+                # starej wartości i nowa formuła =HIPERŁĄCZE() może być szara zamiast niebieskiej
+                try:
+                    self.worksheet.update_cell(row_index, Col.QR, '')
+                except Exception:
+                    pass
                 # USER_ENTERED -> pozwala Sheets zinterpretować formuły (np. HYPERLINK)
                 self.worksheet.update_cells(cells_to_update, value_input_option="USER_ENTERED")
                 logging.info(f"✅ Zaktualizowano {len(cells_to_update)} pól w wierszu {row_index}")
@@ -687,13 +725,15 @@ class SheetsHandler:
             if new_status:
                 # Używamy helpera do wyboru koloru
                 color = self._get_status_color(new_status, carrier)
-                
                 range_name = f"A{row_index}:P{row_index}"
                 
-                self.worksheet.format(range_name, {
-                    "backgroundColor": color,
-                    "textFormat": {"foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0}}
-                })
+                # ✅ ZMIANA: Podobnie jak wyżej, formatujemy TYLKO tło
+                format_dict = {"backgroundColor": color}
+                
+                if new_status.lower() in ["closed", "canceled", "anulowane"]:
+                    format_dict["textFormat"] = {"foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}, "bold": True}
+                
+                self.worksheet.format(range_name, format_dict)
                 logging.info(f"🎨 Zmieniono kolor wiersza {row_index} (Status: {new_status}, Carrier: {carrier})")
 
         except Exception as e:
@@ -778,6 +818,64 @@ class SheetsHandler:
                 
         return default_color
     
+    def test_qr_codes_in_sheet(self):
+        """
+        FUNKCJA TESTOWA: Wpisuje 10 przykładowych QR kodów (L6:L16) do arkusza.
+        Każdy kod to klikalny link HIPERŁĄCZE do qrserver.com.
+        Używaj TYLKO do testów — nie wywołuje się automatycznie.
+
+        Przykładowe dane reprezentują różne typy linków QR:
+        - URL śledzenia paczki (InPost, DPD, DHL)
+        - Payload P|telefon|kod (format InPost paczkomat)
+        - Zwykły URL (np. strona śledzenia)
+        """
+        if not self.connected and not self.connect():
+            logging.error("❌ Brak połączenia z arkuszem — nie można wpisać testowych QR.")
+            return False
+
+        # 10 przykładowych wartości wejściowych (takich jakie mogłoby zwrócić AI lub regex)
+        test_values = [
+            # 1. Payload InPost P|telefon|kod — budowany w _format_clickable_qr jako qrserver URL
+            "P|500100200|123456",
+            # 2. Bezpośredni URL do qrserver (już gotowy link)
+            "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=P%7C500100200%7C654321",
+            # 3. Link śledzenia InPost
+            "https://inpost.pl/sledzenie-przesylek?number=520000099900000123456789",
+            # 4. Link śledzenia DPD
+            "https://tracktrace.dpd.com.pl/parcelDetails?p1=0000363570900W",
+            # 5. Link śledzenia DHL
+            "https://www.dhl.com/pl-pl/home/tracking/tracking-express.html?submit=1&tracking-id=JJD000030185064000048049759",
+            # 6. Link śledzenia GLS
+            "https://gls-group.eu/PL/pl/sledzenie-paczek?match=12345678901",
+            # 7. Link śledzenia Poczta Polska
+            "https://emonitoring.poczta-polska.pl/?numer=RR123456789PL",
+            # 8. Payload InPost — inny numer telefonu i kod
+            "P|600700800|987654",
+            # 9. URL ogólny — strona odbioru paczki z automatu DHL BOX
+            "https://www.dhlparcel.pl/pl/odbierz.html?pin=456789&locker=WAW001",
+            # 10. URL do obrazka QR (np. wygenerowany przez kuriera)
+            "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=TESTPACZKA2024",
+        ]
+
+        updates = []
+        for i, raw_value in enumerate(test_values):
+            row = 6 + i  # L6 do L15 (10 wierszy)
+            formatted = self._format_clickable_qr(raw_value)
+            updates.append({
+                'range': f"L{row}",
+                'values': [[formatted]]
+            })
+            logging.info(f"🔗 L{row}: {raw_value[:60]} → {formatted[:80]}")
+
+        try:
+            self.worksheet.batch_update(updates, value_input_option="USER_ENTERED")
+            logging.info("✅ test_qr_codes_in_sheet: wpisano 10 testowych QR linków do L6:L15.")
+            print("✅ Testowe QR kody wpisane do kolumny L (wiersze 6–15). Otwórz arkusz i sprawdź klikalność!")
+            return True
+        except Exception as e:
+            logging.error(f"❌ Błąd podczas wpisywania testowych QR: {e}")
+            return False
+
     def calculate_fallback_delivery_date(self, carrier_name, start_date_str):
         """
         Oblicza szacowaną datę dostawy, jeśli nie ma jej w mailu.

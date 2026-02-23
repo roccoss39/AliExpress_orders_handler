@@ -187,7 +187,7 @@ class OpenAIHandler:
             - Informacje o płatności (payment_info)
             - email odbiorcy paczki
             - Planowany termin doręczenia (expected_delivery_date)
-            - jeśli to paczkomat link do QR (QR_link)
+            - jeśli to paczkomat lub punkt odbioru: link do QR w polu QR_link (WYŁĄCZNIE pełny URL zaczynający się od http:// lub https://; jeśli brak URL — zostaw jako pusty string ""; NIE wpisuj "załącznik", "brak" ani żadnego opisu)
 
             3. DORĘCZONO - Email potwierdzający dostarczenie paczki, z tematem "DPD Polska - doręczone!" lub zawierający tekst "Właśnie otrzymaliśmy potwierdzenie".
             Z tego typu maila wyciągnij:
@@ -258,7 +258,7 @@ class OpenAIHandler:
             }
             return result  # Zwracaj wewnątrz bloku except
     
-    def extract_pickup_notification_data_inpost(self, email_body, subject=None, recipient_email=None):
+    def extract_pickup_notification_data_inpost(self, email_body, subject=None, recipient_email=None, email_date=None):
         """Wyciąga dane z powiadomienia o paczce w paczkomacie"""
         try:
                     # ✅ DODAJ DEBUG ORYGINALNEGO EMAILA
@@ -349,6 +349,16 @@ class OpenAIHandler:
                 # Ogranicz logowanie do pierwszych 150 znaków
                 logging.info(f"Treść email_body (początek): {email_body[200]}")
 
+            # Wyznacz rok z daty maila (żeby AI nie zgadywał)
+            from datetime import datetime
+            if email_date:
+                try:
+                    email_year = datetime.strptime(email_date[:10], '%Y-%m-%d').year
+                except Exception:
+                    email_year = datetime.now().year
+            else:
+                email_year = datetime.now().year
+
             prompt = f"""
             Wyciągnij następujące informacje z powiadomienia InPost o paczce gotowej do odbioru:
             1. Kod odbioru paczki (4-6 cyfr)
@@ -358,18 +368,23 @@ class OpenAIHandler:
             5. Numer telefonu adresata
             6. Adres email adresata
             7. Godziny dostępności paczkomatu (np. "PN-SB 10-22")
-            8. Link do kodu QR lub informacja, gdzie znajduje się kod QR w mailu
+            8. Link QR do odbioru paczki (jeśli istnieje w treści maila)
 
             Temat maila: {subject}
+            Data wysłania maila: {email_date or 'nieznana'} (rok: {email_year})
             
             Treść maila (może być skrócona):
             {email_body}
             
             WAŻNE: 
-            - Szukaj linków do obrazów lub odniesień do załączników zawierających kod QR
-            - W polu 'qr_code' umieść link do obrazu z kodem QR lub informację 'załącznik'
-            - Jeśli nie możesz znaleźć niektórych danych, zostaw te pola puste.
-            - Format daty powinien być zawsze DD.MM.YYYY (np. 18.05.2025)
+            - W polu 'qr_code' wpisz WYŁĄCZNIE dane w formacie "P|numer_telefonu|kod_odbioru" (bez cudzysłowów, bez spacji), np. P|720133912|663493.
+            - Numer telefonu bierz z pola "Numer telefonu" w mailu (9 cyfr bez +48), kod odbioru z pola "Kod odbioru" (6 cyfr).
+            - NIE buduj sam URL-a do qrserver.com — system zrobi to automatycznie na podstawie wartości P|...|...
+            - Jeśli w mailu nie ma numeru telefonu ani kodu odbioru, zostaw pole 'qr_code' jako pusty string "".
+            - NIE wpisuj słów takich jak "załącznik", "attachment", "brak" ani żadnego opisu tekstowego.
+            - Jeśli nie możesz znaleźć innych danych, zostaw te pola jako pusty string "".
+            - Format daty powinien być zawsze DD.MM.YYYY (np. 18.05.{email_year})
+            - WAŻNE: Jeśli w mailu podana jest data bez roku (np. "25.02" lub "Środa 25.02"), ZAWSZE użyj roku {email_year} (roku wysłania maila). NIE zgaduj roku!
             
             Odpowiedź sformatuj jako obiekt JSON z kluczami: pickup_code, pickup_address, pickup_location_code, pickup_deadline, phone_number, customer_name, available_hours, qr_code
             """
@@ -420,17 +435,18 @@ class OpenAIHandler:
                 if data.get("phone_number"):
                     data["phone_number"] = self._format_phone_for_display(data["phone_number"])
                 
-                # W funkcji extract_pickup_notification_data dodaj kod do analizy odpowiedzi:
+                # Walidacja pola qr_code — akceptujemy URL lub payload P|telefon|kod lub pusty string
                 if 'qr_code' in data:
-                    # Sprawdź format danych QR
-                    qr_data = data['qr_code']
-                    if isinstance(qr_data, str):
-                        # Jeśli to URL, pozostaw bez zmian
-                        if qr_data.startswith(('http://', 'https://')):
-                            pass
-                        # Jeśli to informacja o załączniku, dodaj flagę
-                        elif qr_data.lower() in ['attachment', 'załącznik', 'zalacznik']:
-                            data['qr_code_in_attachment'] = True
+                    qr_data = str(data.get('qr_code') or '').strip()
+                    if qr_data.startswith(('http://', 'https://')):
+                        data['qr_code'] = qr_data  # OK — to URL
+                    elif qr_data.startswith('P|') and qr_data.count('|') == 2:
+                        data['qr_code'] = qr_data  # OK — payload InPost, Python zakoduje | jako %7C
+                    else:
+                        # AI zwróciło tekst (np. "załącznik", "brak", "null") — czyścimy
+                        if qr_data:
+                            logging.warning(f"⚠️ AI zwróciło nieprawidłową wartość qr_code: '{qr_data}' — czyszczę do ''")
+                        data['qr_code'] = ''
                 
             except json.JSONDecodeError as e:
                 logging.error(f"Błąd parsowania JSON: {e}")
@@ -937,7 +953,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
         
         return result
     
-    def general_extract_carrier_notification_data(self, email_body, subject, carrier_name, recipient_email):
+    def general_extract_carrier_notification_data(self, email_body, subject, carrier_name, recipient_email, email_date=None):
         """
         Uniwersalna funkcja ekstrakcji danych z powiadomień przewoźników
         
@@ -958,6 +974,23 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                 return None
         
             to_header = f"Adres email odbiorcy (To:): {recipient_email}" if recipient_email else "Brak informacji o odbiorcy"
+
+            # Oblicz rok z daty maila — AI używa go gdy mail nie zawiera pełnej daty
+            from datetime import datetime as _dt
+            if email_date and hasattr(email_date, 'year'):
+                email_year = email_date.year
+                email_date_str = email_date.strftime('%d.%m.%Y')
+            elif isinstance(email_date, str) and email_date:
+                try:
+                    _parsed = _dt.fromisoformat(email_date)
+                    email_year = _parsed.year
+                    email_date_str = _parsed.strftime('%d.%m.%Y')
+                except Exception:
+                    email_year = _dt.now().year
+                    email_date_str = email_date
+            else:
+                email_year = _dt.now().year
+                email_date_str = 'nieznana'
                      
             # ZMIEŃ LIMIT Z 25000 NA 15000 - bo template promptu też zajmuje miejsce
             if len(email_body) > 15000: 
@@ -1039,6 +1072,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
 
             Nagłówek To: {to_header}
             Temat maila: {subject}
+            Data wysłania maila: {email_date_str} — WAŻNE: jeśli w treści maila brak roku, użyj roku {email_year} z tej daty!
 
             Treść maila:
             {email_body}
