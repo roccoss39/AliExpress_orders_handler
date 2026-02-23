@@ -650,20 +650,56 @@ class EmailAvailabilityManager:
             return []
 
     def check_email_availability(self):
-        import json
-        import os
-        
-        logging.info("🎨 Aktualizacja kolorów i statusów w arkuszu Accounts...")
-        active_emails = []
-        mappings_file = "user_mappings.json"
-        
-        if os.path.exists(mappings_file):
-            try:
-                with open(mappings_file, 'r', encoding='utf-8') as f:
-                    mappings = json.load(f)
-                    for key in mappings.keys(): active_emails.append(key.lower())
-            except Exception as e: logging.error(f"Błąd odczytu mapowań: {e}")
+        """Aktualizuje kolory i statusy w zakładce Accounts.
 
+        Bardziej precyzyjna logika (zamiast user_mappings.json):
+        - konto jest "zajęte" (czerwone), jeśli w głównym arkuszu zamówień (Ali_orders)
+          istnieje przynajmniej 1 wiersz dla danego emaila (lub jego loginu), którego status NIE jest końcowy.
+
+        Dzięki temu Accounts odzwierciedla realne aktywne zamówienia w arkuszu.
+        """
+        logging.info("🎨 Aktualizacja kolorów i statusów w arkuszu Accounts...")
+
+        # 1) Pobierz dane z głównego arkusza zamówień (Ali_orders)
+        orders_sheet = getattr(self.sheets_handler, 'worksheet', None)
+        if not orders_sheet:
+            logging.warning("⚠️ Brak sheets_handler.worksheet - nie mogę sprawdzić Ali_orders")
+            return
+
+        try:
+            orders_values = orders_sheet.get_all_values()
+        except Exception as e:
+            logging.error(f"❌ Błąd pobierania danych z Ali_orders: {e}")
+            return
+
+        # Zbiór emaili/loginów, które mają aktywne (nie-końcowe) zamówienia
+        active_accounts = set()
+
+        # Statusy końcowe (bazujemy na tym, co jest używane w DeliveredOrdersManager)
+        final_status_tokens = [
+            "dostarczona", "delivered", "dostarczono", "odebrana",
+            "zwrócona", "zwrocona", "closed", "anul", "canceled", "returned"
+        ]
+
+        for row in orders_values[1:]:
+            if not row:
+                continue
+
+            email_val = row[Col.EMAIL - 1] if len(row) >= Col.EMAIL else ""
+            status_val = row[Col.STATUS - 1] if len(row) >= Col.STATUS else ""
+
+            email_norm = str(email_val).strip().lower()
+            if not email_norm:
+                continue
+
+            status_norm = str(status_val).strip().lower()
+            if status_norm and any(tok in status_norm for tok in final_status_tokens):
+                continue
+
+            active_accounts.add(email_norm)
+            active_accounts.add(email_norm.split('@')[0])
+
+        # 2) Zastosuj formatowanie w Accounts
         try:
             if hasattr(self.sheets_handler, 'worksheet'):
                 sheet = self.sheets_handler.worksheet.spreadsheet.worksheet("Accounts")
@@ -673,25 +709,34 @@ class EmailAvailabilityManager:
             all_values = sheet.get_all_values()
             red_format = {"backgroundColor": {"red": 1.0, "green": 0.8, "blue": 0.8}}
             white_format = {"backgroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}}
-            
+
             for i, row in enumerate(all_values[1:], start=2):
-                if not row: continue
+                if not row:
+                    continue
+
                 email_in_sheet = str(row[0]).strip().lower()
                 login_part = email_in_sheet.split('@')[0]
-                
-                is_active = (email_in_sheet in active_emails) or (login_part in active_emails)
-                current_status = row[1] if len(row) > 1 else ""
-                
-                if is_active:
-                    if current_status != "-": sheet.update_cell(i, 2, "-")
-                    try: sheet.format(f"A{i}:B{i}", red_format)
-                    except: pass
-                else:
-                    if current_status != "wolny": sheet.update_cell(i, 2, "wolny")
-                    try: sheet.format(f"A{i}:B{i}", white_format)
-                    except: pass
 
-            logging.info("✅ Zakończono aktualizację statusów w Accounts.")
+                is_active = (email_in_sheet in active_accounts) or (login_part in active_accounts)
+                current_status = row[1] if len(row) > 1 else ""
+
+                if is_active:
+                    if current_status != "-":
+                        sheet.update_cell(i, 2, "-")
+                    try:
+                        sheet.format(f"A{i}:B{i}", red_format)
+                    except Exception:
+                        pass
+                else:
+                    if current_status != "wolny":
+                        sheet.update_cell(i, 2, "wolny")
+                    try:
+                        sheet.format(f"A{i}:B{i}", white_format)
+                    except Exception:
+                        pass
+
+            logging.info(f"✅ Zakończono aktualizację statusów w Accounts. Aktywne konta: {len(active_accounts)}")
+
         except Exception as e:
             logging.error(f"❌ Błąd w check_email_availability: {e}")
 
