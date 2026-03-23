@@ -1014,7 +1014,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             prompt = f"""
             Przeanalizuj poniższy email od {carrier_name}. Email może dotyczyć jednego z etapów przesyłki:
 
-            1. NADANIE PRZESYŁKI - Email zawiera informację o nadaniu paczki. Tylko gdy paczka dotrze do POLSKI i zostanie przekaza dla kuriera jak INPOST, DPD, DHL, POCZTA POLSKA
+            1. NADANIE PRZESYŁKI - Email zawiera informację o nadaniu paczki (np. słowa "Poszło!", "wyruszyła w podróż"). Ustaw ten status, nawet jeśli w mailu podany jest docelowy adres paczkomatu, ale paczka jeszcze tam nie dotarła. Tylko gdy paczka dotrze do POLSKI i zostanie przekaza dla kuriera jak INPOST, DPD, DHL, POCZTA POLSKA. Jeśli to Aliexpress - nigdy dla niego nie ustawiaj statusu shipment_sent.
             Z tego typu maila wyciągnij:
             - Ustaw status przesyłki: "shipment_sent" (OBOWIĄZKOWO)
             - Numer przesyłki od danego przewoźnika (package_number) - różne formaty:
@@ -1022,15 +1022,16 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
                 DHL: JJD/3S/JVGL + cyfry, np. JJD000030185064000048049759 
                 InPost: zazwyczaj 24 cyfry, np. 520000012680041086770098
                 GLS: rózne formaty
-                AliExpress: zwykle zawiera LP + cyfry lub jest to numer zamówienia
                 Poczta Polska: np. PX1945096838, zaczyna sie zazywczaj od PX
 
             - Data nadania (shipping_date) - format DD.MM.YYYY
             - Planowany termin doręczenia (expected_delivery_date) - format DD.MM.YYYY
             - Adres dostawy (delivery_address)
             - Email odbiorcy (email)
+            - Pamiętaj że jeśli to email od aliexpress to nie ustawiaj statusu shipment_sent - 
+              to status tylko dla lokalnych przewozników. Dla Aliexpress może być in transit o czym mowa dalej.
 
-            2. DOSTAWA DZIŚ / GOTOWE DO ODBIORU - Email informujący o paczce gotowej do odbioru lub kurierze w drodze.
+            2. DOSTAWA DZIŚ / GOTOWE DO ODBIORU - Email informujący, że paczka czeka już fizycznie w punkcie/paczkomacie LUB kurier dostarczy ją dzisiaj pod drzwi. Ustaw status "pickup", jeśli w mailu znajduje się kod odbioru (dla automatów/punktów) LUB jest wyraźna informacja, że paczka jest w doręczeniu i kurier przyjedzie z nią DZISIAJ. Jeśli paczka dopiero wyruszyła od nadawcy i nie ma mowy o dostawie na "dziś", to jest to NADANIE (shipment_sent).
             Z tego typu maila wyciągnij:
             - Ustaw status przesyłki: "pickup" (OBOWIĄZKOWO)
             - Numer przesyłki (package_number)
@@ -1080,7 +1081,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             WAŻNE: 
             - OBOWIĄZKOWO zwróć odpowiedni status w polu "status" dla typu powiadomienia:
               * "shipment_sent" - dla powiadomienia o nadaniu - JESLI ZNASZ PRZEWOZNIKA I NIE JEST NIM ALIEXPRESS
-              * "pickup" - jeśli paczka już dotarła i czeka na odbiór lub kurier dzisiaj doręczy (jeśli masz pick up code to na pewno jest do odbioru)
+              * "pickup" - TYLKO jeśli paczka fizycznie czeka na odbiór w skrytce/punkcie (szukaj wtedy kodu PIN/QR) LUB gdy mail mówi, że kurier doręczy ją DZISIAJ pod wskazany adres.
               * "delivered" - dla powiadomienia o dostarczeniu 
               * "confirmed" - dla potwierdzenia zamówienia
               * "transit" - dla informacji o przesyłce w transporcie - TYLKO JESLI MAIL OD ALIEXPRESS - czyli paczka wyruszyla do Poslki po potwierdzeniu zamowienia.

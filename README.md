@@ -222,3 +222,65 @@ Odpowiedź JSON zawiera czas działania (uptime) oraz liczbę przetworzonych mai
 
 🔒 Bezpieczeństwo
 ⚠️ WAŻNE: Pliki .env, service_account.json oraz *.log zawierają wrażliwe dane. Są one domyślnie dodane do .gitignore. Nigdy ich nie upubliczniaj.
+
+## 🍓 Wdrożenie na Raspberry Pi (Serwer 24/7)
+
+Projekt jest zoptymalizowany pod kątem pracy na **Raspberry Pi Zero 2 W** (system Debian Bookworm Lite). Dzięki niskim wymaganiom zasobowym, urządzenie to idealnie sprawdza się jako dedykowany, energooszczędny serwer pracujący w trybie ciągłym.
+
+### 🔑 Logowanie do serwera
+Dostęp do konsoli Malinki uzyskujemy poprzez protokół SSH. Z poziomu terminala na laptopie wpisz:
+```bash
+ssh dawid@malina
+Domyślna ścieżka projektu na serwerze: /home/dawid/aliexpress_orders⚙️ Zarządzanie usługą (Systemd)Bot działa jako usługa systemowa ali-tracker.service. Oznacza to, że uruchamia się automatycznie po starcie systemu i restartuje w razie wystąpienia błędów.AkcjaKomendaSprawdzenie statususudo systemctl status ali-trackerPodgląd logów (Live)journalctl -u ali-tracker -fRestart botasudo systemctl restart ali-trackerZatrzymanie botasudo systemctl stop ali-trackerLogi z dzisiajjournalctl -u ali-tracker --since "today"🚀 Automatyzacja wdrożenia (Skrypt Deploy)Aby uniknąć ręcznego kopiowania plików i restartowania usługi za każdym razem, gdy wprowadzisz zmiany w kodzie, w projekcie znajduje się skrypt deploy.sh. Pozwala on na pełną aktualizację bota jednym poleceniem z poziomu Twojego laptopa.Użycie (wykonaj na laptopie):Bash# Uruchom wdrożenie
+./deploy.sh
+
+# Sprawdzenie logów z laptopa na malince
+ssh malina "journalctl -u ali-tracker -f"
+🐍 Środowisko wirtualne (venv)Na serwerze używane jest izolowane środowisko Python, aby uniknąć konfliktów z pakietami systemowymi. Jeśli dodasz nową bibliotekę do requirements.txt, środowisko zaktualizuje się automatycznie przy uruchomieniu skryptu deploy.sh.🏥 Monitoring zdrowia (Health Check)Możesz sprawdzić, czy bot "żyje" i pracuje prawidłowo, wysyłając zapytanie HTTP do wbudowanego serwera monitorującego:Bash# Wykonaj na Malince lub w przeglądarce (http://malina:8081/health)
+curl http://localhost:8081/health
+Odpowiedź {"status": "ok"} potwierdza, że pętla główna bota oraz połączenie z API Google/OpenAI działają bez zarzutu.
+Wklej ten fragment na samym dole swojego `README.md` na laptopie, uaktualnij `deploy.sh` dodając `*.md` i po wpisaniu `./deploy.sh` wszystko na Malince zaktualizuje się do nowej wersji!
+
+### 🔄 Tryb Reprocess (Ręczne skanowanie historii)
+
+Tryb `--reprocess-email` pozwala na wymuszenie ponownego przeskanowania starszych wiadomości dla konkretnego konta. Przydaje się, gdy bot był wyłączony, dodałeś nowe konto z historią zamówień lub chcesz naprawić brakujące dane w arkuszu.
+
+**⚠️ WAŻNE:** Zawsze zatrzymaj usługę działającą w tle przed uruchomieniem tego trybu, aby zapobiec konfliktom (dwa procesy nie mogą modyfikować arkusza jednocześnie).
+
+#### Opcja 1: Z poziomu Raspberry Pi (Zalecane)
+Zaloguj się na serwer (`ssh dawid@malina`), a następnie wykonaj poniższe kroki w terminalu Malinki:
+
+```bash
+# 1. Zatrzymaj automat działający w tle
+sudo systemctl stop ali-tracker
+
+# 2. Uruchom reprocess używając wirtualnego środowiska (venv)
+cd ~/aliexpress_orders
+./venv/bin/python3 main.py --reprocess-email rafa.afar1@interia.pl --limit 20
+
+# Opcjonalnie z filtrem tematu (np. przyspiesza skanowanie, szukając tylko InPostu):
+# ./venv/bin/python3 main.py --reprocess-email rafa.afar1@interia.pl --limit 20 --subject-contains "czeka"
+
+# 3. Po zakończeniu skanowania, uruchom automat ponownie
+sudo systemctl start ali-tracker
+Opcja 2: Zdalnie z poziomu Twojego laptopa
+Możesz wykonać całą procedurę bez wchodzenia w interaktywną powłokę Malinki. Wystarczy wysłać komendy bezpośrednio z terminala na swoim laptopie:
+
+Bash
+# 1. Zatrzymaj bota zdalnie
+ssh dawid@malina "sudo systemctl stop ali-tracker"
+
+# 2. Odpal reprocess (logi z analizy będą wyświetlać się na żywo u Ciebie na laptopie)
+ssh dawid@malina "cd ~/aliexpress_orders && ./venv/bin/python3 main.py --reprocess-email rafa.afar1@interia.pl --limit 20"
+
+# 3. Włącz bota w tle ponownie
+ssh dawid@malina "sudo systemctl start ali-tracker"
+
+### Jak to teraz wgrać na serwer?
+Po wklejeniu tego do `README.md` na swoim laptopie i zapisaniu pliku, pamiętaj, że wystarczy wpisać:
+
+```bash
+./deploy.sh
+
+## Sprawdzenie czy działa z laptopa XX to ip, zazwyczaj 237
+curl http://192.168.0.XX:8081/health
