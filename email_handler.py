@@ -20,19 +20,12 @@ class EmailHandler:
         self.last_check_time = time.time() - (3600 * 24)  # 24 godziny wstecz
         self.openai_handler = OpenAIHandler()
 
+        # Ulepszony słownik bazujący na końcówkach (domenach) maila
         self.email_sources = {
-            'gmail': {
-                'imap_server': 'imap.gmail.com',
-                'port': 993
-            },
-            'interia': {
-                'imap_server': 'poczta.interia.pl',
-                'port': 993
-            },
-            'o2': {
-                'imap_server': 'poczta.o2.pl',
-                'port': 993
-            }
+            'gmail.com': {'imap_server': 'imap.gmail.com', 'port': 993},
+            'interia.pl': {'imap_server': 'poczta.interia.pl', 'port': 993},
+            'o2.pl': {'imap_server': 'poczta.o2.pl', 'port': 993},
+            'wp.pl': {'imap_server': 'imap.wp.pl', 'port': 993}
         }
         
         # Wczytujemy mapowania
@@ -895,41 +888,49 @@ class EmailHandler:
             logging.error(f"Błąd podczas zapisywania daty emaila użytkownika {user_key}: {e}")
 
     def connect_to_email_account(self, email_config):
-            """Łączy się z kontem email i zwraca klienta IMAP"""
-            try:
-                source = email_config.get('source', 'unknown')
-                
-                server_info = self.email_sources.get(source, {})
-                
-                if not server_info:
-                    logging.error(f"❌ Nieznane źródło email: {source}")
-                    return None
-                    
-                imap_server = server_info['imap_server']
-                port = server_info['port']
-                email_addr = email_config['email']
-                password = email_config['password']
-                
-                logging.info(f"🔗 Łączenie z {imap_server}:{port} dla {email_addr}")
-                
-                timeout_settings = {'o2': 60, 'interia': 45, 'gmail': 30}
-                timeout = timeout_settings.get(source, 30)
-                
-                client = imaplib.IMAP4_SSL(imap_server, port, timeout=timeout)
-                client.login(email_addr.lower(), password)
-                
-                logging.info(f"✅ Połączono z {source}: {email_addr}")
-                return client
-                
-            except imaplib.IMAP4.error as e:
-                logging.error(f"❌ Błąd IMAP dla {source}: {e}")
+        """Łączy się z kontem email na podstawie domeny i zwraca klienta IMAP"""
+        try:
+            email_addr = email_config.get('email', '')
+            password = email_config.get('password', '')
+            
+            if not email_addr or not password:
+                logging.error("❌ Brak adresu email lub hasła w konfiguracji!")
                 return None
-            except OSError as e:
-                logging.error(f"❌ Błąd połączenia z {source}: {e}")
+
+            # 1. Wyodrębnienie domeny z adresu email (np. wp.pl, interia.pl)
+            domena = email_addr.split('@')[-1].lower()
+            
+            # 2. Szukanie serwera w naszym słowniku
+            server_info = self.email_sources.get(domena)
+            
+            if not server_info:
+                logging.error(f"❌ Nieobsługiwana domena email: {domena}. Dodaj ją do self.email_sources!")
                 return None
-            except Exception as e:
-                logging.error(f"❌ Błąd ogólny dla {source}: {e}")
-                return None
+                
+            imap_server = server_info['imap_server']
+            port = server_info['port']
+            
+            logging.info(f"🔗 Łączenie z {imap_server}:{port} dla {email_addr}")
+            
+            # 3. Dynamiczne ustawienie timeoutu w zależności od domeny
+            timeout_settings = {'o2.pl': 60, 'interia.pl': 45, 'gmail.com': 30, 'wp.pl': 45}
+            timeout = timeout_settings.get(domena, 30)
+            
+            client = imaplib.IMAP4_SSL(imap_server, port, timeout=timeout)
+            client.login(email_addr.lower(), password)
+            
+            logging.info(f"✅ Połączono z serwerem dla: {email_addr}")
+            return client
+            
+        except imaplib.IMAP4.error as e:
+            logging.error(f"❌ Błąd IMAP dla {email_addr}: {e}")
+            return None
+        except OSError as e:
+            logging.error(f"❌ Błąd połączenia dla {email_addr}: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"❌ Błąd ogólny podczas logowania do {email_addr}: {e}")
+            return None
         
     def decode_email_subject(self, subject):
         """Dekoduje temat emaila z różnych encodingów"""

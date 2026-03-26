@@ -201,11 +201,28 @@ def test_interia_login(email_address, password, search_keyword="zamówienie potw
     print(f"Email: {email_address}")
     print(f"Szukam emaili z tematem: '{search_keyword}'")
     print()
+    SERWERY_IMAP = {
+        "interia.pl": "poczta.interia.pl",
+        "wp.pl": "imap.wp.pl",
+        "o2.pl": "poczta.o2.pl",
+        "gmail.com": "imap.gmail.com"
+    }
+
+    # Wyciągamy domenę z adresu email (wszystko po znaku '@')
+    domena = email_address.split('@')[-1].lower()
+    
+    # Sprawdzamy, czy znamy serwer dla tej domeny
+    imap_server = SERWERY_IMAP.get(domena)
+    
+    if not imap_server:
+        print(f"❌ Nieobsługiwana domena: {domena}. Dodaj ją do słownika SERWERY_IMAP!")
+        return
+    # ------------------------------------------
     
     try:
-        # 1. Połącz z IMAP
-        print("📡 Łączenie z poczta.interia.pl:993...")
-        mail = imaplib.IMAP4_SSL('poczta.interia.pl', 993)
+        # 1. Połącz z odpowiednim serwerem IMAP
+        print(f"📡 Łączenie z {imap_server}:993...")
+        mail = imaplib.IMAP4_SSL(imap_server, 993)
         
         # 2. Zaloguj
         print(f"🔐 Logowanie jako {email_address}...")
