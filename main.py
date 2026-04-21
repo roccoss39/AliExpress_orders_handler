@@ -23,6 +23,8 @@ from reprocess_manager import run_reprocess
 import argparse
 import os 
 from health_check import stop_health_server
+
+import gc
     
 # ==========================================
 # 🔧 KONFIGURACJA LOGOWANIA (Dynamiczna)
@@ -153,18 +155,29 @@ def main_loop(single_user=None, subject_word=None):
     while not is_shutdown_requested():
         try:
             # 1. Usuwanie duplikatów (raz na 24h)
+            # 1. Porządki raz na 24h (Duplikaty + Cache + RAM)
             if time.time() - last_duplicate_check > 86400:
+                logging.info("🧹 Rozpoczynam dobowe sprzątanie systemu...")
+                
+                # A. Usuwanie duplikatów w arkuszu
                 sheets_handler.remove_duplicates()
-                # 🧹 Czyszczenie starego cache usuniętych użytkowników (starsze niż 24h)
-                current_time = time.time()
+                
+                # B. Czyszczenie starego cache'u usuniętych użytkowników (z SheetsHandler)
+                # Zapobiega puchnięciu słownika deleted_users_cache w RAM
+                now = time.time()
                 sheets_handler.deleted_users_cache = {
-                    k: v for k, v in sheets_handler.deleted_users_cache.items() 
-                    if current_time - v < 86400
+                    email: timestamp for email, timestamp in sheets_handler.deleted_users_cache.items() 
+                    if now - timestamp < 86400
                 }
-
+                
+                # C. Wymuszenie zwolnienia pamięci RAM (Garbage Collector)
+                gc.collect()
+                
+                logging.info("✅ Dobowe sprzątanie zakończone.")
                 last_duplicate_check = time.time()
 
             logging.info(f"--- NOWY CYKL: {datetime.now().strftime('%H:%M:%S')} ---")
+            
             
             # 2. Połączenie z arkuszem
             limiters.wait_for("sheets_read")

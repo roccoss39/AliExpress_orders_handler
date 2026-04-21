@@ -284,3 +284,29 @@ Po wklejeniu tego do `README.md` na swoim laptopie i zapisaniu pliku, pamiętaj,
 
 ## Sprawdzenie czy działa z laptopa XX to ip, zazwyczaj 237
 curl http://192.168.0.XX:8081/health
+
+
+## Filtrowanie i Tryby Wymuszenia (NOWOŚĆ) 🎯
+Użycie któregokolwiek z poniższych parametrów automatycznie przełącza bota w tryb głębokiego skanowania - nastepca reprocess:
+
+Sprawdza wszystkie maile (nawet przeczytane).
+
+Ignoruje blokady daty (przetwarza historyczne wiadomości).
+
+Przetwarza dane chronologicznie (od najstarszych).
+
+Ograniczenie do jednego użytkownika:
+
+Bash
+# Bot sprawdzi tylko skrzynkę jan.kowalski@interia.pl
+python3 main.py --single-user jan.kowalski@interia.pl
+Szukanie konkretnej frazy w temacie:
+
+Bash
+# Bot przetworzy tylko maile, które mają w tytule słowo "tymczasowo"
+# Świetne do testowania specyficznych statusów InPost
+python3 main.py --word tymczasowo
+Połączenie filtrów:
+
+Bash
+python3 main.py --single-user jan.kowalski@interia.pl --word "paczka"

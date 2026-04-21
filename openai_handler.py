@@ -66,7 +66,7 @@ class OpenAIHandler:
         # Usuń inne potencjalne problemy
         response_text = response_text.strip()
         
-        logging.info(f"Wycyszczona odpowiedź JSON: {response_text}")
+        logging.debug(f"Wycyszczona odpowiedź JSON: {response_text}")
         return response_text
         
     def extract_order_confirmation_data(self, email_body, subject, recipient_email=None):
@@ -766,7 +766,7 @@ class OpenAIHandler:
         logging.info(f"📝 PEŁNY PROMPT WYSYŁANY DO AI:")
         logging.info(f"📏 Rozmiar promptu: {prompt_size} znaków ({estimated_tokens:.0f} tokenów)")
         logging.info("="*80)
-        logging.info(prompt)  # ✅ CAŁKOWITY PROMPT
+        logging.debug(prompt)  # ✅ CAŁKOWITY PROMPT DEBUG
         logging.info("="*80)
     
         # Sprawdź rozmiar przed wysłaniem
@@ -799,7 +799,7 @@ class OpenAIHandler:
             
             try:
                 parsed_json = json.loads(cleaned_response)
-                logging.info(f"✅ SPARSOWANY JSON: {json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
+                logging.debug(f"✅ SPARSOWANY JSON: {json.dumps(parsed_json, indent=2, ensure_ascii=False)}")
                 return parsed_json
             except json.JSONDecodeError as e:
                 logging.error(f"❌ Błąd parsowania JSON: {e}")
