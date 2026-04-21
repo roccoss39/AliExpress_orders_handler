@@ -135,6 +135,45 @@ class EmailHandler:
             self.user_mappings[user_key]["package_numbers"].append(package_number)
             logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> paczka {package_number}")
             self._save_mappings()
+
+    def _save_refund(self, user_key, order_number=None):
+        """Zapisuje status refund dla użytkownika i opcjonalnie numer zamówienia."""
+        if not user_key:
+            return
+
+        user_key = str(user_key).lower().strip()
+        order_number = str(order_number).strip() if order_number else None
+
+        if user_key not in self.user_mappings:
+            self.user_mappings[user_key] = {
+                "order_numbers": [],
+                "package_numbers": [],
+                "last_email_date": None
+            }
+
+        user_data = self.user_mappings[user_key]
+        if "refund" not in user_data or not isinstance(user_data.get("refund"), dict):
+            user_data["refund"] = {
+                "detected": False,
+                "orders": [],
+                "updated_at": None
+            }
+
+        user_data["refund"]["detected"] = True
+        user_data["refund"]["updated_at"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        if order_number and order_number not in user_data["refund"]["orders"]:
+            user_data["refund"]["orders"].append(order_number)
+
+        self._save_mappings()
+        logging.info(f"💸 Zapisano refund dla użytkownika '{user_key}' (order={order_number or 'brak'})")
+
+    def _has_refund(self, user_key):
+        """Sprawdza czy użytkownik ma zapisany status refund."""
+        if not user_key:
+            return False
+        user_data = self.user_mappings.get(str(user_key).lower().strip(), {})
+        refund_data = user_data.get("refund", {})
+        return bool(refund_data.get("detected"))
     
     def remove_user_mapping(self, user_key, package_number=None, order_number=None):
         """
@@ -690,8 +729,28 @@ class EmailHandler:
             "expected_delivery_date": None,
             "qr_code": None,
             "info": None,   
-            "email_date": email_date                       
+            "email_date": email_date,
+            "refund_detected": False
         }
+
+        user_key = data.get("user_key")
+        data["refund_detected"] = self._has_refund(user_key)
+
+        normalized_subject = str(subject or "").strip().lower()
+        if normalized_subject == "przetworzono zwrot za anulowane zakupy":
+            data["refund_detected"] = True
+
+            # Spróbuj wyciągnąć numer zamówienia (najpierw temat, potem treść)
+            order_number = None
+            for source_text in [subject or "", (body or "")[:2000]]:
+                match = re.search(r'(?<!\d)(\d{10,20})(?!\d)', source_text)
+                if match:
+                    order_number = match.group(1)
+                    break
+
+            self._save_refund(user_key, order_number)
+            logging.info(f"Status refund_detected: {data['refund_detected']}")
+            return data
         
         use_ai = getattr(config, 'USE_OPENAI_API', False) 
         
@@ -738,7 +797,9 @@ class EmailHandler:
                             if not openai_data.get("carrier"):
                                 openai_data["carrier"] = handler.name
                             logging.info("🤖 AI zwróciło dane - pomijam Regexy.")
-                            return {**data, **openai_data}
+                            merged = {**data, **openai_data}
+                            merged["refund_detected"] = data.get("refund_detected", False)
+                            return merged
                     except Exception as e:
                         logging.error(f"❌ Błąd AI: {e}. Przełączam na tryb awaryjny (Regex).")
 
@@ -746,12 +807,16 @@ class EmailHandler:
                 result = handler.parse_delivery_status(subject, recipient, body, handler.name)
                 if result:
                     logging.info(f"⚡ Szybki Regex znalazł status: {result.get('status')}")
-                    return {**data, **result}
+                merged = {**data, **result}
+                merged["refund_detected"] = data.get("refund_detected", False)
+                return merged
                 
                 if handler.name == "AliExpress":
                     result = handler.parse_transit_status(subject, recipient, handler.name)
                     if result:
-                        return {**data, **result}
+                        merged = {**data, **result}
+                        merged["refund_detected"] = data.get("refund_detected", False)
+                        return merged
                 
                 # 3. ZAAWANSOWANY REGEX (Pełna analiza treści)
                 logging.info(f"🔍 Uruchamiam handler.process (Pełny Regex) dla {handler.name}")
@@ -764,7 +829,9 @@ class EmailHandler:
                     if not processed_data.get("carrier"):
                         processed_data["carrier"] = handler.name
                     logging.info(f"✅ Dane wyciągnięte Regexpem")
-                    return {**data, **processed_data}
+                    merged = {**data, **processed_data}
+                    merged["refund_detected"] = data.get("refund_detected", False)
+                    return merged
     
         logging.info(f"Mail nie został zakwalifikowany do żadnej kategorii: {subject}")
         return None

@@ -39,6 +39,7 @@ class TelegramNotifier:
         user = order_data.get('user_key', 'nieznany')
         carrier = order_data.get('carrier', 'Inny')
         pkg = order_data.get('package_number', 'brak')
+        refund_detected = bool(order_data.get('refund_detected', False))
         
         icon = "📦"
         if status == "delivered": icon = "✅"
@@ -50,6 +51,7 @@ class TelegramNotifier:
             f"👤 <b>Dla:</b> {user}\n"
             f"🚛 <b>Przewoźnik:</b> {carrier}\n"
             f"📊 <b>Status:</b> {status}\n"
-            f"🔢 <b>Nr:</b> <code>{pkg}</code>"
+            f"🔢 <b>Nr:</b> <code>{pkg}</code>\n"
+            f"💸 <b>Refund dla usera:</b> {'TAK' if refund_detected else 'NIE'}"
         )
         self.send_message(msg)
