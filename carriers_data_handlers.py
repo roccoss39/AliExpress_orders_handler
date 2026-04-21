@@ -93,7 +93,8 @@ class AliexpressDataHandler(BaseDataHandler):
             "delivery notification",         # Delivery notification
             "zamówienie zakończone",         # Order completed
             "order completed",                # Order completed EN
-            "zamówienie wysłane"
+            "zamówienie wysłane",
+            "Przetworzono zwrot za anulowane zakupy"
         ]
         
         # SPRAWDŹ TEMAT

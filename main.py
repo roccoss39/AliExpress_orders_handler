@@ -52,8 +52,65 @@ logging.basicConfig(
 logging.raiseExceptions = False 
 logging.getLogger('openai').setLevel(logging.WARNING)
 
-def main_loop():
+def main_loop(single_user=None, subject_word=None):
     """Główna pętla programu"""
+    
+    # ==========================================
+    # 🎯 TRYB POJEDYNCZEGO KONTO I FILTROWANIA (Wymuszenia)
+    # ==========================================
+    # Jeśli używamy jakiegokolwiek filtra (single_user lub word), wymuszamy głębokie skanowanie
+    if single_user or subject_word:
+        logging.info("=" * 60)
+        logging.info("🎯 TRYB WYMUSZENIA (Filtrowanie aktywne)")
+        
+        # 1. Wymuszenie pobierania WSZYSTKICH wiadomości z serwera
+        config.CHECK_ONLY_UNSEEN = False
+        
+        # 2. Ignorowanie blokady daty (żeby bot przetworzył nawet stare maile)
+        config.IGNORE_LAST_EMAIL_DATE_CHECK = True
+
+        # 3. Przetwarzanie od najstarszych do najnowszych (chronologicznie)
+        config.PROCESS_FROM_NEWEST = False
+        
+        logging.info("⚙️ Wymuszono config.CHECK_ONLY_UNSEEN = False (Sprawdzam całą historię)")
+        logging.info("⚙️ Wymuszono config.IGNORE_LAST_EMAIL_DATE_CHECK = True (Ignoruję blokadę daty)")
+        logging.info("⚙️ Wymuszono config.PROCESS_FROM_NEWEST = False (Przetwarzam od najstarszych)")
+        logging.info("=" * 60)
+
+    # Filtr 1: Tylko konkretny użytkownik
+    if single_user:
+        logging.info(f"👤 Ograniczam pracę do konta: {single_user}")
+        
+        # Dynamiczne filtrowanie dla trybu ACCOUNTS
+        original_get_emails = EmailAvailabilityManager.get_emails_from_accounts_sheet
+        def filtered_get_emails(self_instance):
+            configs = original_get_emails(self_instance)
+            if configs:
+                filtered = [e for e in configs if e.get('email', '').strip().lower() == single_user.lower()]
+                if not filtered:
+                    logging.warning(f"⚠️ Nie znaleziono konta {single_user} w arkuszu Accounts!")
+                return filtered
+            return configs
+        EmailAvailabilityManager.get_emails_from_accounts_sheet = filtered_get_emails
+        
+        # Dynamiczne filtrowanie dla trybu CONFIG
+        if hasattr(config, 'ALL_EMAIL_CONFIGS'):
+            config.ALL_EMAIL_CONFIGS = [e for e in config.ALL_EMAIL_CONFIGS if e.get('email', '').strip().lower() == single_user.lower()]
+
+    # Filtr 2: Tylko konkretne słowo w temacie
+    if subject_word:
+        logging.info(f"🔎 Szukam tylko maili zawierających słowo: '{subject_word}'")
+        
+        # Dynamiczne przechwycenie funkcji analyze_email
+        original_analyze = EmailHandler.analyze_email
+        def filtered_analyze(self_inst, subject, *args, **kwargs):
+            if subject_word.lower() not in subject.lower():
+                logging.info(f"⏭️ Pomijam (brak słowa '{subject_word}'): {subject[:40]}...")
+                return None
+            return original_analyze(self_inst, subject, *args, **kwargs)
+        
+        EmailHandler.analyze_email = filtered_analyze
+    # ==========================================
     
     # Inicjalizacja systemów
     init_graceful_shutdown()
@@ -68,7 +125,6 @@ def main_loop():
     sheets_handler = SheetsHandler()
     
     # 🔌 Wstrzyknięcie email_handler do sheets_handler
-    # Pozwala to arkuszowi czyścić lokalne mapowania przy archiwizacji
     sheets_handler.email_handler = email_handler
     
     set_handlers(email_handler, sheets_handler)
@@ -124,17 +180,20 @@ def main_loop():
             for order_data in processed_emails:
                 if is_shutdown_requested(): break
                 
+                if order_data.get("refund_detected"):
+                    telegram.send_cancellation_notice(order_data)
+                    logging.info("ℹ️ Wykryto zwrot za anulowane zakupy - pomijam zapis do arkusza.")
+                    continue
+            
                 # Dodatkowe powiadomienie mailowe dla odbioru
                 if order_data.get("status") == "pickup":
                     send_pickup_notification(order_data)
 
                 # ✅ GŁÓWNA AKTUALIZACJA ARKUSZA
-                # Teraz sheets_handler robi wszystko: tworzy, aktualizuje, archiwizuje, czyści konta.
                 limiters.wait_for("sheets_write")
                 sheets_handler.handle_order_update(order_data, telegram_notifier=telegram)
 
                 # ✅ CZYSZCZENIE LOKALNEGO PLIKU JSON
-                # SheetsHandler czyści arkusz, a my tutaj doczyszczamy pamięć bota
                 if order_data.get("status") == "delivered":
                     user_key = order_data.get("user_key")
                     logging.info(f"🧹 Status 'delivered'. Usuwam lokalne mapowanie dla {user_key}...")
@@ -144,7 +203,6 @@ def main_loop():
                         order_data.get("package_number"),
                         order_data.get("order_number")
                     )
-                    # UWAGA: Usunięto stąd free_up_account, bo SheetsHandler robi to automatycznie
 
             # 6. Aktualizacja kolorów w Accounts (tylko kosmetyka)
             if len(processed_emails) > 0 or first_run:
@@ -154,7 +212,6 @@ def main_loop():
                     EmailAvailabilityManager(sheets_handler).check_email_availability()
                     logging.info("✅ Statusy odświeżone.")
                 except Exception as e:
-                    # Ignorujemy błędy tutaj, żeby nie zatrzymywać bota
                     pass
                 
                 first_run = False
@@ -170,7 +227,6 @@ def main_loop():
                 logging.info(f"📊 STATYSTYKI: {get_stats()}")
 
             # 8. INTELIGENTNE OCZEKIWANIE (Smart Sleep)
-            # To naprawia problem z Ctrl+C
             sleep_minutes = getattr(config, 'CHECK_INTERVAL', 5)
             sleep_seconds = sleep_minutes * 60
             if getattr(config, 'QUICK_CHECK', False):
@@ -192,8 +248,6 @@ def main_loop():
             time.sleep(60)
     
     set_main_loop_running(False)
-    
-    # Dodatkowe wywołanie stopu serwera (dla pewności, jeśli wyjdziemy z pętli while)
     from health_check import stop_health_server
     stop_health_server()
     
@@ -210,11 +264,12 @@ if __name__ == "__main__":
         "--subject-contains",
         type=str,
         default="",
-        help=(
-            "(Reprocess) Przetwarzaj tylko maile, których temat zawiera podaną frazę (case-insensitive). "
-            "Np. --subject-contains czek"
-        ),
+        help="(Reprocess) Przetwarzaj tylko maile, których temat zawiera podaną frazę (case-insensitive)."
     )
+    
+    parser.add_argument("--single-user", type=str, help="Uruchom główną pętlę TYLKO dla wybranego adresu email")
+    # 🌟 NOWA FLAGA DODANA TUTAJ 🌟
+    parser.add_argument("--word", type=str, help="Uruchom główną pętlę TYLKO dla maili zawierających to słowo w temacie")
 
     args = parser.parse_args()
 
@@ -225,9 +280,19 @@ if __name__ == "__main__":
         run_reprocess(args.reprocess_email, limit=args.limit, subject_contains=args.subject_contains)
         
     else:
-        print("Uruchamianie głównej pętli. Naciśnij Ctrl+C aby zatrzymać.")
+        # Informacja o aktywnych filtrach w konsoli przed startem
+        filters_info = []
+        if args.single_user: filters_info.append(f"Konto: {args.single_user}")
+        if args.word: filters_info.append(f"Słowo w temacie: '{args.word}'")
+        
+        if filters_info:
+            print(f"Uruchamianie głównej pętli Z FILTRAMI ({', '.join(filters_info)}). Naciśnij Ctrl+C aby zatrzymać.")
+        else:
+            print("Uruchamianie standardowej głównej pętli. Naciśnij Ctrl+C aby zatrzymać.")
+            
         try:
-            main_loop()
+            # Przekazujemy argumenty do pętli
+            main_loop(single_user=args.single_user, subject_word=args.word)
         except KeyboardInterrupt:
             logging.info("\n🛑 Wykryto Ctrl+C. Zamykanie...")
         except Exception as e:
@@ -235,13 +300,10 @@ if __name__ == "__main__":
             traceback.print_exc()
         finally:
             logging.info("🔌 Sprzątanie po zamknięciu...")
-            
-            # Próba grzecznego zamknięcia serwera (dla zwolnienia portu)
             try:
                 stop_health_server()
             except:
                 pass
-            
             logging.info("💀 WYMUSZENIE ZAMKNIĘCIA PROCESU (os._exit)")
             # To jest "strzał w głowę" dla procesu. 
             # Nie czeka na wątki, zamyka wszystko natychmiast.
