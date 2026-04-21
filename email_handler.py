@@ -139,21 +139,35 @@ class EmailHandler:
             logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> paczka {package_number}")
             self._save_mappings()
     
-    def _save_refund(self, user_key, order_number):
+    def _save_refund(self, user_key, order_number=None):
+        """Zapisuje informację o zwrocie/banie dla użytkownika."""
+        if not user_key:
+            return
+            
         user_key = user_key.lower()
 
+        # Jeśli użytkownika nie ma w bazie (bo np. dopiero złożył zamówienie), tworzymy go
         if user_key not in self.user_mappings:
-            return
+            self.user_mappings[user_key] = {
+                "order_numbers": [], 
+                "package_numbers": [],
+                "last_email_date": None
+            }
 
         user_data = self.user_mappings[user_key]
+
+        # 1. Zapisujemy globalną flagę dla usera (łatwe do odpytania z zewnątrz)
+        user_data["has_refund"] = True
 
         if "refund_orders" not in user_data:
             user_data["refund_orders"] = []
 
-        if order_number not in user_data["refund_orders"]:
+        # 2. Jeśli mail zawierał numer zamówienia, dodajemy go do listy
+        if order_number and order_number not in user_data["refund_orders"]:
             user_data["refund_orders"].append(order_number)
-            logging.info(f"💸 Zapisano refund: {user_key} -> {order_number}")
-            self._save_mappings()
+            
+        logging.info(f"💸 Zapisano refund/ban dla: {user_key} (Zamówienie: {order_number or 'Nieznane'})")
+        self._save_mappings()
 
     def remove_user_mapping(self, user_key, package_number=None, order_number=None):
         """
@@ -757,8 +771,8 @@ class EmailHandler:
 
                     order_number = data.get("order_number")
 
-                    if order_number:
-                          self._save_refund(user_key, order_number)
+                   
+                    self._save_refund(user_key, order_number)
 
                     logging.info(f"Status refund_detected: {data['refund_detected']}")
                     return data

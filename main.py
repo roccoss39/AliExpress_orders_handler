@@ -122,6 +122,9 @@ def main_loop(single_user=None, subject_word=None):
     telegram.send_startup_message()
     
     email_handler = EmailHandler()
+
+    telegram.user_mappings = email_handler.user_mappings
+
     sheets_handler = SheetsHandler()
     
     # 🔌 Wstrzyknięcie email_handler do sheets_handler
@@ -152,6 +155,13 @@ def main_loop(single_user=None, subject_word=None):
             # 1. Usuwanie duplikatów (raz na 24h)
             if time.time() - last_duplicate_check > 86400:
                 sheets_handler.remove_duplicates()
+                # 🧹 Czyszczenie starego cache usuniętych użytkowników (starsze niż 24h)
+                current_time = time.time()
+                sheets_handler.deleted_users_cache = {
+                    k: v for k, v in sheets_handler.deleted_users_cache.items() 
+                    if current_time - v < 86400
+                }
+
                 last_duplicate_check = time.time()
 
             logging.info(f"--- NOWY CYKL: {datetime.now().strftime('%H:%M:%S')} ---")

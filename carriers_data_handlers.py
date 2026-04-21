@@ -322,7 +322,7 @@ class InPostDataHandler(BaseDataHandler):
         
         if "dostarczona" in subject_lower or "odebrana" in subject_lower:
             status = "delivered"
-        elif "czeka na odbiór" in subject_lower or "w paczkomacie" in subject_lower or "kod odbioru" in body_lower:
+        elif "czeka na odbiór" in subject_lower or "magazynowana" in subject_lower or "w paczkomacie" in subject_lower or "kod odbioru" in body_lower:
             status = "pickup"
         elif "potwierdzenie utworzenia paczki" in subject_lower:
             status = "created_by_inpost"

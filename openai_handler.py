@@ -12,32 +12,48 @@ class OpenAIHandler:
         self.min_request_interval = 3  # 3 sekundy między requestami
         self.daily_request_count = 0
         self.daily_limit = 45  # Limit 45 requestów dziennie (zostawiamy margines)
+        self.current_day = time.localtime().tm_yday
     
         # Konfiguracja zgodna z działającym przykładem
         self.client = OpenAI(
             base_url="https://models.inference.ai.azure.com",
-            api_key=self.api_key
+            api_key=self.api_key,
+            timeout=30.0
         )
 
     def _rate_limit(self):
-        """Ograniczenie częstotliwości requestów"""
+        """Ograniczenie częstotliwości requestów i reset dzienny"""
         current_time = time.time()
-        time_since_last = current_time - self.last_request_time
         
-        # Sprawdź dzienny limit
+        # 1. SPRAWDZANIE CZY NASTAŁ NOWY DZIEŃ
+        # tm_yday zwraca numer dnia w roku (np. dzisiaj jest 111 dzień roku)
+        today = time.localtime(current_time).tm_yday
+        
+        # Jeśli dzień się zmienił, zerujemy licznik
+        if not hasattr(self, 'current_day'):
+            self.current_day = today
+            
+        if today != self.current_day:
+            logging.info(f"🌅 Nowy dzień ({today})! Resetuję licznik OpenAI.")
+            self.daily_request_count = 0
+            self.current_day = today
+
+        # 2. SPRAWDZANIE LIMITU DZIENNEGO
         if self.daily_request_count >= self.daily_limit:
             logging.warning(f"🚫 Osiągnięto dzienny limit requestów OpenAI ({self.daily_limit})")
             return False
-        
-        # Sprawdź interwał czasowy
+
+        # 3. SPRAWDZANIE ODSTĘPU (Rate Limit - min. 3 sekundy)
+        time_since_last = current_time - self.last_request_time
         if time_since_last < self.min_request_interval:
             sleep_time = self.min_request_interval - time_since_last
-            logging.info(f"⏱️ Rate limiting: czekam {sleep_time:.1f}s")
+            logging.info(f"⏱️ Zbyt szybkie zapytanie. Czekam {sleep_time:.1f}s...")
             time.sleep(sleep_time)
-        
+
+        # Aktualizacja statystyk
         self.last_request_time = time.time()
         self.daily_request_count += 1
-        logging.info(f"📊 Request {self.daily_request_count}/{self.daily_limit}")
+        logging.info(f"📊 Request OpenAI: {self.daily_request_count}/{self.daily_limit}")
         return True
         
     def _clean_json_response(self, response_text):
@@ -1031,7 +1047,7 @@ Zwróć TYLKO JSON w następującym formacie (puste pola pozostaw jako puste str
             - Pamiętaj że jeśli to email od aliexpress to nie ustawiaj statusu shipment_sent - 
               to status tylko dla lokalnych przewozników. Dla Aliexpress może być in transit o czym mowa dalej.
 
-            2. DOSTAWA DZIŚ / GOTOWE DO ODBIORU - Email informujący, że paczka czeka już fizycznie w punkcie/paczkomacie LUB kurier dostarczy ją dzisiaj pod drzwi. Ustaw status "pickup", jeśli w mailu znajduje się kod odbioru (dla automatów/punktów) LUB jest wyraźna informacja, że paczka jest w doręczeniu i kurier przyjedzie z nią DZISIAJ. Jeśli paczka dopiero wyruszyła od nadawcy i nie ma mowy o dostawie na "dziś", to jest to NADANIE (shipment_sent).
+            2. DOSTAWA DZIŚ / GOTOWE DO ODBIORU - Email informujący, że paczka czeka już fizycznie w punkcie/paczkomacie LUB kurier dostarczy ją dzisiaj pod drzwi. Ustaw status "pickup", jeśli w mailu znajduje się kod odbioru (dla automatów/punktów) LUB jest wyraźna informacja, że paczka jest w doręczeniu i kurier przyjedzie z nią DZISIAJ. Jeśli paczka dopiero wyruszyła od nadawcy i nie ma mowy o dostawie na "dziś", to jest to NADANIE (shipment_sent). Możliwa zmiana magazynu (paczkomatu) - to także pickup.
             Z tego typu maila wyciągnij:
             - Ustaw status przesyłki: "pickup" (OBOWIĄZKOWO)
             - Numer przesyłki (package_number)
