@@ -6,7 +6,6 @@ import re
 import time
 from datetime import datetime, timedelta
 from carriers_sheet_handlers import Col, EmailAvailabilityManager, InPostCarrier, DHLCarrier, AliExpressCarrier, DPDCarrier, GLSCarrier, PocztaPolskaCarrier
-import functools
 
 class SheetsHandler:
     def _format_clickable_qr(self, qr_value: str) -> str:
@@ -87,9 +86,6 @@ class SheetsHandler:
             credentials = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', scope)
             client = gspread.authorize(credentials)
             
-            # Ustawia 30 sekund timeoutu na każde zapytanie do API Google
-            client.session.request = functools.partial(client.session.request, timeout=30)
-
             self.spreadsheet = client.open_by_key(config.SPREADSHEET_ID)
             self.worksheet = self.spreadsheet.worksheet(config.SHEET_NAME)
             
