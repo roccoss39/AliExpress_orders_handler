@@ -90,6 +90,9 @@ class EmailHandler:
         user_key = user_key.lower()
         order_number = str(order_number).strip()
 
+        if "refund_orders" not in self.user_mappings[user_key]:
+         self.user_mappings[user_key]["refund_orders"] = []
+
 
         if user_key not in self.user_mappings:
             self.user_mappings[user_key] = {
@@ -136,6 +139,22 @@ class EmailHandler:
             logging.info(f"Zapisano powiązanie: użytkownik '{user_key}' -> paczka {package_number}")
             self._save_mappings()
     
+    def _save_refund(self, user_key, order_number):
+        user_key = user_key.lower()
+
+        if user_key not in self.user_mappings:
+            return
+
+        user_data = self.user_mappings[user_key]
+
+        if "refund_orders" not in user_data:
+            user_data["refund_orders"] = []
+
+        if order_number not in user_data["refund_orders"]:
+            user_data["refund_orders"].append(order_number)
+            logging.info(f"💸 Zapisano refund: {user_key} -> {order_number}")
+            self._save_mappings()
+
     def remove_user_mapping(self, user_key, package_number=None, order_number=None):
         """
         Usuwa powiązania zamówień/paczek. Jeśli brak numerów - usuwa cały rekord.
@@ -642,6 +661,8 @@ class EmailHandler:
                 if processed:
                     processed["email_date"] = email_date
                     processed["user_key"] = user_key
+
+                    
                     processed_data.append(processed)
                     
                     logging.info(f"✅ Przetworzono email z {email_date}: {subject[:50]}")
@@ -696,6 +717,7 @@ class EmailHandler:
         
         use_ai = getattr(config, 'USE_OPENAI_API', False) 
         
+        
         for handler in self.data_handlers:
             if handler.can_handle(subject, body):
                 logging.info(f"Wykryto email obsługiwany przez {handler.name}")
@@ -732,6 +754,12 @@ class EmailHandler:
 
                 if normalized_subject == "przetworzono zwrot za anulowane zakupy":
                     data["refund_detected"] = True
+
+                    order_number = data.get("order_number")
+
+                    if order_number:
+                          self._save_refund(user_key, order_number)
+
                     logging.info(f"Status refund_detected: {data['refund_detected']}")
                     return data
 
