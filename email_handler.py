@@ -690,7 +690,8 @@ class EmailHandler:
             "expected_delivery_date": None,
             "qr_code": None,
             "info": None,   
-            "email_date": email_date                       
+            "email_date": email_date,
+            "not_sended_all": None               
         }
         
         use_ai = getattr(config, 'USE_OPENAI_API', False) 
@@ -726,6 +727,12 @@ class EmailHandler:
                      if user_key:
                          self._update_user_last_email_date(user_key, email_date)
                 # -----------------------------------------------------------------------------------
+
+                normalized_subject = str(subject or "").strip().lower()
+                if normalized_subject == "przetworzono zwrot za anulowane zakupy":
+                    return {
+                    "not_sended_all": True
+                    }
 
                 # 1. PRIORYTET: AI
                 if use_ai:

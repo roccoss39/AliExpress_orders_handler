@@ -39,6 +39,7 @@ class TelegramNotifier:
         user = order_data.get('user_key', 'nieznany')
         carrier = order_data.get('carrier', 'Inny')
         pkg = order_data.get('package_number', 'brak')
+        banned = order_data.get('not_sended_all', 'brak')
         
         icon = "📦"
         if status == "delivered": icon = "✅"
@@ -50,6 +51,21 @@ class TelegramNotifier:
             f"👤 <b>Dla:</b> {user}\n"
             f"🚛 <b>Przewoźnik:</b> {carrier}\n"
             f"📊 <b>Status:</b> {status}\n"
-            f"🔢 <b>Nr:</b> <code>{pkg}</code>"
+            f"🔢 <b>Nr:</b> <code>{pkg}</code>\n"
+            f"<b>Ban?:</b> {banned}"
+        )
+        self.send_message(msg)
+
+    def send_cancellation_notice(self, order_data):
+        """Wysyła powiadomienie o anulowaniu zakupu i zwrocie."""
+        user = order_data.get('user_key', 'nieznany')
+        email_addr = order_data.get('email', 'brak')
+        subject = order_data.get('subject', 'brak')
+        msg = (
+            "💸 <b>Anulowano zakup</b>\n"
+            f"👤 <b>Użytkownik:</b> {user}\n"
+            f"📧 <b>Email:</b> {email_addr}\n"
+            f"📝 <b>Tytuł:</b> {subject}\n\n"
+            "<i>Wykryto zwrot za anulowane zakupy. Pomijam dalsze przetwarzanie tej wiadomości.</i>"
         )
         self.send_message(msg)

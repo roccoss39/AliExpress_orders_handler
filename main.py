@@ -124,6 +124,11 @@ def main_loop():
             for order_data in processed_emails:
                 if is_shutdown_requested(): break
                 
+                if order_data.get("not_sended_all"):
+                    telegram.send_cancellation_notice(order_data)
+                    logging.info("ℹ️ Wykryto zwrot za anulowane zakupy - pomijam zapis do arkusza.")
+                    continue
+            
                 # Dodatkowe powiadomienie mailowe dla odbioru
                 if order_data.get("status") == "pickup":
                     send_pickup_notification(order_data)
