@@ -39,7 +39,9 @@ class TelegramNotifier:
         user = order_data.get('user_key', 'nieznany')
         carrier = order_data.get('carrier', 'Inny')
         pkg = order_data.get('package_number', 'brak')
-        banned = order_data.get('not_sended_all', 'brak')
+
+        ban_status = "Anulowano" if order_data.get('refund_detected') is True else "Brak"
+        
         
         icon = "📦"
         if status == "delivered": icon = "✅"
@@ -52,7 +54,7 @@ class TelegramNotifier:
             f"🚛 <b>Przewoźnik:</b> {carrier}\n"
             f"📊 <b>Status:</b> {status}\n"
             f"🔢 <b>Nr:</b> <code>{pkg}</code>\n"
-            f"<b>Ban?:</b> {banned}"
+            f"<b>Ban:</b> {ban_status}"
         )
         self.send_message(msg)
 

@@ -691,7 +691,7 @@ class EmailHandler:
             "qr_code": None,
             "info": None,   
             "email_date": email_date,
-            "not_sended_all": None               
+            "refund_detected": None               
         }
         
         use_ai = getattr(config, 'USE_OPENAI_API', False) 
@@ -729,10 +729,11 @@ class EmailHandler:
                 # -----------------------------------------------------------------------------------
 
                 normalized_subject = str(subject or "").strip().lower()
+
                 if normalized_subject == "przetworzono zwrot za anulowane zakupy":
-                    return {
-                    "not_sended_all": True
-                    }
+                    data["refund_detected"] = True
+                    logging.info(f"Status refund_detected: {data['refund_detected']}")
+                    return data
 
                 # 1. PRIORYTET: AI
                 if use_ai:
